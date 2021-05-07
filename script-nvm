@@ -1,0 +1,23 @@
+#!/bin/bash
+# If we're not on the correct node version, then fix it.
+if [ x`node -v 2>/dev/null` '!=' xv`cat .nvmrc` ]; then
+    export NVM_DIR="$PWD/.nvm"
+    # Install nvm if missing
+    [ -d "$NVM_DIR" ] || git clone https://github.com/nvm-sh/nvm.git "$NVM_DIR"
+    # Update nvm
+    ( cd "$NVM_DIR"; git pull )
+    # Load nvm
+    \. "$NVM_DIR/nvm.sh"
+    # Install and use compatible node and npm version
+    nvm install
+    nvm use
+    # If we're still not on the correct node version, then fail hard.
+    if [ x`node -v 2>/dev/null` '!=' xv`cat .nvmrc` ]; then
+        exit 1
+    fi
+    # Helpful reminder
+    if [ "$1" '==' "internal" -a -t 1 ]; then
+        echo -e 'Run \e[31m. ./script-nvm\e[0m to speed up subsequent invocations of ./script'
+    fi
+    echo ""
+fi

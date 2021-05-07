@@ -1,0 +1,63 @@
+#!/bin/bash
+
+. ./script-nvm internal
+
+set -e
+finish() { if [ $? -gt 0 ]; then echo-red FAILED; exit 1; fi; }
+trap finish EXIT
+
+if [ -t 1 ]; then
+    echo-green()  { echo -ne "\e[32m"; echo -n "$@"; echo -e "\e[0m"; }
+    echo-red()    { echo -ne "\e[31m"; echo -n "$@"; echo -e "\e[0m"; }
+else
+    echo-green()  { echo "$@"; }
+    echo-red()    { echo "$@"; }
+fi
+
+npm-install() {
+    rm -rf node_modules/
+    npm install
+}
+
+npm-ci() {
+    rm -rf node_modules/
+    npm ci
+}
+
+run-tests() {
+    npx jest
+    npx eslint .
+    npx prettier -c .
+    echo-green done testing
+}
+
+reprettier() {
+    npx prettier --write .
+}
+
+print-help() {
+cat <<EOF
+Usage:
+
+  . ./script-nvm             # NOTICE the dot-space-dot and the dash. Install
+                             # the correct node and npm version into the current
+                             # shell. This makes subsequent ./script invocations
+                             # faster.
+
+  ./script npm-install       # Update and install npm dependencies.
+
+  ./script npm-ci            # Install npm dependencies according to lockfile.
+
+  ./script run-tests         # Run tests.
+
+  ./script reprettier        # Reprocess all code with PrettierJS
+EOF
+}
+
+if [ -z "$1" ]; then
+    print-help
+else
+    # Run the command described by the arguments, in the context of the
+    # definitions above
+    "$@"
+fi
