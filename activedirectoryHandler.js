@@ -220,6 +220,10 @@ class activedirectoryHandler {
         await this.initialize(req);
       }
       assert(this.initialized);
+      // Validate attributes against schema
+      for (const attrib of select) {
+        assert(attrib in this.isSingleValued, `Refuse to fetch non-existent attribute '${attrib}'`);
+      }
     }
 
     // Create client
