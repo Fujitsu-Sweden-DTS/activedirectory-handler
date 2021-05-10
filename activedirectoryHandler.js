@@ -8,6 +8,20 @@ const ldapparsing = require("./ldapparsing");
 const utils = require("./utils");
 const { promisify } = require("util");
 
+const AttributeNameRE = /^[a-z][A-Za-z0-9-]{1,59}$/u;
+const attributesNeededForInitialization = ["lDAPDisplayName", "attributeSyntax", "isSingleValued"];
+function validDN(dn) {
+  try {
+    ldapjs.parseDN(dn);
+    return true;
+  } catch (e) {
+    if (e.name === "InvalidDistinguishedNameError") {
+      return false;
+    }
+    throw e;
+  }
+}
+
 class activedirectoryHandler {
   constructor(activedirectoryHandlerConfig) {
     const {
@@ -22,6 +36,7 @@ class activedirectoryHandler {
     } = activedirectoryHandlerConfig;
 
     // The Base DN for the domain
+    assert(validDN(domainBaseDN), "domainBaseDN must be a valid DN");
     this.domainBaseDN = domainBaseDN;
 
     // It seems that ldapjs treats single- and multi-valued attributes the same:
@@ -36,27 +51,41 @@ class activedirectoryHandler {
     // option passed to the constructor will override the schema, and can be used
     // for attributes that are multi-valued per schema definition but in practice
     // are single-valued.
-    this.isSingleValued = {
-      // These hard-coded values are needed for initialization.
-      lDAPDisplayName: true,
-      attributeSyntax: true,
-      isSingleValued: true,
-      ..._.cloneDeep(isSingleValued || {}),
-    };
+    assert(_.isPlainObject(isSingleValued), "isSingleValued must be a plain object");
+    assert(
+      _.every(_.keys(isSingleValued), k => k.match(AttributeNameRE)),
+      `Every key in isSingleValued must match ${AttributeNameRE}.`,
+    );
+    assert(
+      _.every(_.keys(isSingleValued), k => isSingleValued[k] === Boolean(isSingleValued[k])),
+      "Every value in isSingleValued must be a boolean.",
+    );
+    this.isSingleValued = _.cloneDeep(isSingleValued);
+    for (const attrib of attributesNeededForInitialization) {
+      assert(!(attrib in this.isSingleValued), `You may not use isSingleValued to overload '${attrib}'.`);
+      this.isSingleValued[attrib] = true; // All of them are single-valued.
+    }
 
     // The application logger
+    for (const fun of ["debug", "info", "warn", "error", "critical"]) {
+      assert(_.isFunction(log[fun]), `log object must have a '${fun}' function.`);
+    }
     this.log = log;
 
     // The AD password
+    assert(_.isString(password), "Password must be a string");
     this.password = password;
 
     // The Base DN for the AD schema
+    assert(validDN(schemaConfigBaseDN), "schemaConfigBaseDN must be a valid DN");
     this.schemaConfigBaseDN = schemaConfigBaseDN;
 
     // The AD connection URL
+    assert(_.isString(url), "url must be a string");
     this.url = url;
 
     // The AD username
+    assert(_.isString(user), "user must be a string");
     this.user = user;
 
     // In AD, the type of a value depends only on the attribute, not the object
@@ -122,21 +151,28 @@ class activedirectoryHandler {
 
     const starttime = new Date();
     for await (const item of this.getObjects({
-      select: ["lDAPDisplayName", "attributeSyntax", "isSingleValued"],
+      select: attributesNeededForInitialization,
       from: this.schemaConfigBaseDN,
       where: ["equals", "objectClass", "attributeSchema"],
       waitForInitialization: false,
     })) {
       // Remember what attributes are multi-valued
-      if (item.lDAPDisplayName in this.isSingleValued) {
-        // do nothing
-      } else if (item.isSingleValued === "TRUE" || item.isSingleValued === true) {
-        this.isSingleValued[item.lDAPDisplayName] = true;
+      let isv = null;
+      if (item.isSingleValued === "TRUE" || item.isSingleValued === true) {
+        isv = true;
       } else if (item.isSingleValued === "FALSE" || item.isSingleValued === false) {
-        this.isSingleValued[item.lDAPDisplayName] = false;
+        isv = false;
       } else {
-        await this.log.warn({ message: "Could not determine whether ldap attribute is single-valued. We will assume that it is not.", item }, req);
-        this.isSingleValued[item.lDAPDisplayName] = false;
+        throw utils.err({ message: "Could not determine whether ldap attribute is single-valued.", item });
+      }
+      if (item.lDAPDisplayName in this.isSingleValued) {
+        if (_.includes(attributesNeededForInitialization, item.lDAPDisplayName)) {
+          assert(isv, "Unexpected schema");
+        } else {
+          assert(this.isSingleValued[item.lDAPDisplayName] !== isv, "Unnecessary isSingleValued overload or duplicate schema entry");
+        }
+      } else {
+        this.isSingleValued[item.lDAPDisplayName] = isv;
       }
       // Assign formatters
       if (item.lDAPDisplayName in this.extractionFormatters) {
@@ -165,10 +201,10 @@ class activedirectoryHandler {
     // Some validation
     assert(_.isArray(select) && 1 <= _.size(select) && _.every(select, _.isString), "select must be a non-empty array of strings");
     assert(
-      _.every(select, x => x.match(/^[a-z][A-Za-z0-9-]{1,59}$/u)),
-      "Illegal attribute name in select option. All attribute names must match /^[a-z][A-Za-z0-9-]{1,59}$/.",
+      _.every(select, x => x.match(AttributeNameRE)),
+      `Illegal attribute name in select option. All attribute names must match ${AttributeNameRE}.`,
     );
-    assert(_.isString(from), "from must be a string");
+    assert(validDN(from), "from must be a valid DN");
     assert(_.isString(scope) && _.includes(["base", "one", "sub"], scope), "scope must be one of 'base', 'one' or 'sub'.");
     assert(!_.includes(select, "controls"), "activedirectoryHandler.getObjects does not support selecting the field 'controls'");
     assert(!_.includes(select, "dn"), "activedirectoryHandler.getObjects does not support selecting the field 'dn'. Did you perhaps mean 'distinguishedName'?");
@@ -260,7 +296,7 @@ class activedirectoryHandler {
 
       // Function to process each item
       const formats = _.pick(this.extractionFormatters, select);
-      const process = async function (entry) {
+      const process = async entry => {
         const obj = entry.object,
           rawobj = { dn: [null] }; // See comment below
         for (const { type, _vals } of entry.attributes) {
@@ -295,13 +331,7 @@ class activedirectoryHandler {
               ret.member = members;
               continue;
             }
-            await this.log.warn(
-              {
-                message: "Got attribute without asking for it. Bug in activedirectoryHandler.",
-                attrib,
-              },
-              req,
-            );
+            throw utils.err({ message: "Got attribute without asking for it.", attrib });
           }
           let value = obj[attrib];
           if (this.isSingleValued[attrib] === false) {
@@ -335,7 +365,7 @@ class activedirectoryHandler {
           ret[attrib] = value;
         }
         return ret;
-      }.bind(this);
+      };
 
       // Generator
       outer_loop: while (true) {
@@ -349,9 +379,7 @@ class activedirectoryHandler {
               break;
             case "page":
               // Encode assumption about how ldapjs works
-              if (resume_callback) {
-                throw Error("Bug in activedirectoryHandler");
-              }
+              assert(!resume_callback);
               // Callback not present at last page
               if (!item.callback) {
                 break;
