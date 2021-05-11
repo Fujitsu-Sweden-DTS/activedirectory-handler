@@ -32,15 +32,24 @@ const activedirectoryHandler = require("@fujitsusweden/activedirectory-handler")
 const adHandler = new activedirectoryHandler({
   url: "ldap://your-domain.example.com",
   user: "username",
-  password: "password,
-  domainBaseDN: "ou=MainOU,dc=your-domain,dc=example,dc=com", // default value for 'from' option
+  password: "password",
+  domainBaseDN: "ou=MainOU,dc=your-domain,dc=example,dc=com",
   schemaConfigBaseDN: "cn=Schema,cn=Configuration,dc=your-domain,dc=example,dc=com",
-  log, // The `log` object should hold the following log functions: `debug`, `info`, `warn`, `error` and `critical`. Each log function should be an async function taking arguments `data` and `req`.
-  isSingleValued: { // Optional parameter to override schema for what attributes to treat as single- or multi-valued.
+  log,
+  isSingleValued: {
     exampleAttribute: true,
   },
 });
 ```
+
+Details for configuration options:
+
+* `domainBaseDN` will be used as the default value for the `from` option in searches, see below.
+* `log` is an object holding the following log functions: `debug`, `info`, `warn`, `error` and `critical`.
+  Each log function should be an async function taking arguments `data` and `req`.
+* `isSingleValued`: Attributes will be treated as single- or multi-valued depending on their schema.
+  This optional parameter can be used to override schema information.
+  If `exampleAttribute` is declared in the AD schema as multi-valued but no entity has more than one such value and you don't want to deal with an array, you can force treating it as single-valued as in the example above.
 
 Search example:
 
@@ -58,7 +67,7 @@ for await (const user of adHandler.getObjects({
 Details for options to `getObjects`:
 
 * `select` is an array of the attribute names to fetch.
-* `from` is the base DN to search. Default to `domainBaseDN` given to `new activedirectoryHandler`.
+* `from` is the base DN to search. Defaults to `domainBaseDN` given to `new activedirectoryHandler`.
 * `where` is a filter expression. See 'LDAP filter DSL' below.
 * `scope` is one of `base`, `one` or `sub`. Defaults to `sub`.
 * `req` for passing to the log functions.
