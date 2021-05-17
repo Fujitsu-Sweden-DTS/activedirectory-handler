@@ -5,6 +5,7 @@ const assert = require("assert");
 const ldapfilter = require("./ldapfilter.js");
 const ldapjs = require("ldapjs");
 
+const booleanAttributes = new Set(["boolAttrib1", "boolAttrib2"]);
 function iter(n, fun, arg) {
   while (n) {
     arg = fun(arg);
@@ -38,12 +39,24 @@ describe("Test that erroneous ldap filter expressions won't be accepted", () => 
     ["oneof", "abc", [123]], // arrValue elements must be valid values
     ["true", "anything"], // true has no operands
     ["false", "anything"], // false has no operands
+    ["equals", "boolAttrib1", "true"], // illegal value for boolean attribute
+    ["equals", "boolAttrib2", "false"], // illegal value for boolean attribute
+    ["equals", "boolAttrib1", "TRUEst"], // illegal value for boolean attribute
+    ["equals", "boolAttrib2", true], // illegal value for boolean attribute
+    ["equals", "boolAttrib1", false], // illegal value for boolean attribute
+    ["beginswith", "boolAttrib2", "TRUE"], // illegal operator for boolean attribute
+    ["endswith", "boolAttrib1", "FALSE"], // illegal operator for boolean attribute
+    ["contains", "boolAttrib2", "TRUE"], // illegal operator for boolean attribute
   ];
   for (let bad of test_erroneous_ldap_filters) {
     test(JSON.stringify(bad), () => {
-      expect(() => ldapfilter(bad)).toThrow();
+      expect(() => ldapfilter(bad, booleanAttributes)).toThrow();
     });
   }
+  test("booleanAttributes required", () => {
+    expect(() => ldapfilter(["true"])).toThrow();
+    expect(() => ldapfilter(["true"], "string")).toThrow();
+  });
 });
 
 describe("Test that ldap filter expressions are correctly synthesized", () => {
@@ -285,6 +298,12 @@ describe("Test that ldap filter expressions are correctly synthesized", () => {
       exp: iter(2 ** 14, x => [...x, ["equals", "ab", "cd"]], ["and"]),
       obj: new ldapjs.AndFilter({ filters: iter(2 ** 14, x => [...x, new ldapjs.EqualityFilter({ attribute: "ab", value: "cd" })], []) }),
     },
+    {
+      //
+      str: "(&(boolAttrib1=TRUE)(boolAttrib2=FALSE))",
+      exp: ["and", ["equals", "boolAttrib1", "TRUE"], ["equals", "boolAttrib2", "FALSE"]],
+      obj: new ldapjs.AndFilter({ filters: [new ldapjs.EqualityFilter({ attribute: "boolAttrib1", value: "TRUE" }), new ldapjs.EqualityFilter({ attribute: "boolAttrib2", value: "FALSE" })] }),
+    },
   ];
   for (const [index, test_case] of test_cases.entries()) {
     assert(_.isEqual(_.omit(test_case, ["str", "exp", "obj"]), {}));
@@ -294,7 +313,7 @@ describe("Test that ldap filter expressions are correctly synthesized", () => {
     test("" + index, () => {
       const { str: expected_filterstring, exp: filterexpression, obj: ldapjs_filterobject } = test_case;
       const filterexpression_clone = _.cloneDeep(filterexpression);
-      const actual_filterstring = ldapfilter(filterexpression);
+      const actual_filterstring = ldapfilter(filterexpression, booleanAttributes);
       const ldapjs_filterstring = ldapjs_filterobject.toString();
       expect(actual_filterstring).toBe(expected_filterstring); // Test that ldapfilter synthesizes correctly
       expect(filterexpression).toEqual(filterexpression_clone); // Test that ldapfilter does not alter its argument

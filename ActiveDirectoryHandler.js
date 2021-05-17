@@ -106,6 +106,9 @@ class ActiveDirectoryHandler {
       lastLogonTimestamp: ldapparsing.dateFormatter_WinNT,
     };
 
+    // The set of boolean attributes
+    this.booleanAttributes = new Set();
+
     this.initialized = false;
 
     this.initialize = _.throttle(this.initialize.bind(this), 10000, { leading: true, trailing: false });
@@ -163,7 +166,11 @@ class ActiveDirectoryHandler {
     })) {
       // Remember what attributes are multi-valued
       let isv = null;
-      if (item.isSingleValued === "TRUE" || item.isSingleValued === true) {
+      if (
+        // Test for both 'TRUE' and true since we're in the middle of initialization.
+        item.isSingleValued === "TRUE" ||
+        item.isSingleValued === true
+      ) {
         isv = true;
       } else if (item.isSingleValued === "FALSE" || item.isSingleValued === false) {
         isv = false;
@@ -178,6 +185,10 @@ class ActiveDirectoryHandler {
         }
       } else {
         this.dictSingleValued[item.lDAPDisplayName] = isv;
+      }
+      // Remember what attributes are boolean
+      if (item.attributeSyntax === "2.5.5.8") {
+        this.booleanAttributes.add(item.lDAPDisplayName);
       }
       // Assign formatters
       if (item.lDAPDisplayName in this.extractionFormatters) {
@@ -198,6 +209,9 @@ class ActiveDirectoryHandler {
       }
     }
     assert(this.dictSingleValued.member === false);
+    for (const attrib of ["attributeSyntax", "distinguishedName", "lDAPDisplayName", "member", "objectClass"]) {
+      assert(!this.booleanAttributes.has(attrib), `Attribute ${attrib} seems to be boolean. It shouldn't.`);
+    }
     this.initialized = true;
     await this.log.debug({ m: "Initialized ActiveDirectoryHandler", time: new Date() - starttime }, req);
   }
@@ -246,7 +260,7 @@ class ActiveDirectoryHandler {
       const attributes = _.uniq([...select, "distinguishedName"]);
       const emitter = await search(from, {
         attributes,
-        filter: ldapfilter(where),
+        filter: ldapfilter(where, this.booleanAttributes),
         scope,
         paged: { pagePause: true },
       });

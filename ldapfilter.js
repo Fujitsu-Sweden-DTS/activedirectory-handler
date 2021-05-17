@@ -101,6 +101,9 @@ function _escape(inp) {
 //     ["true"]:             Always true.
 //     ["false"]:            Always false.
 //
+// @arg b:
+//     A set of the names for the attributes to treat as booleans.
+//
 // Note that the expressions beginswith, endswith and contains, cannot be used
 // with DN attributes. See:
 // https://social.technet.microsoft.com/wiki/contents/articles/5392.active-directory-ldap-syntax-filters.aspx
@@ -118,8 +121,9 @@ function synthvalue(a) {
   return _escape(a);
 }
 // Synthesize <expression>
-function ldapfilter(i) {
+function ldapfilter(i, b) {
   assert(Array.isArray(i));
+  assert(_.isSet(b));
   let l = i.length;
   assert(l > 0);
   let op = i[0];
@@ -130,23 +134,29 @@ function ldapfilter(i) {
       // The '&' and '|' syntax allows any number of operands >= 1, but let's use it only with at least 2.
       assert(l >= 2);
       if (l === 2) {
-        return ldapfilter(i[1]);
+        return ldapfilter(i[1], b);
       }
-      return "(" + { and: "&", or: "|" }[op] + _.map(_.slice(i, 1), ldapfilter).join("") + ")";
+      return "(" + { and: "&", or: "|" }[op] + _.map(_.slice(i, 1), x => ldapfilter(x, b)).join("") + ")";
     case "not":
       assert(l === 2);
-      return "(!" + ldapfilter(i[1]) + ")";
+      return "(!" + ldapfilter(i[1], b) + ")";
     case "equals":
       assert(l === 3);
+      if (b.has(i[1])) {
+        assert(i[2] === "TRUE" || i[2] === "FALSE", `'${i[1]} is a boolean attribute and can only be equal to 'TRUE' or 'FALSE'.`);
+      }
       return "(" + synthattribute(i[1]) + "=" + synthvalue(i[2]) + ")";
     case "beginswith":
       assert(l === 3);
+      assert(!b.has(i[1]), `'${i[1]} is a boolean attribute and is not allowed in 'beginswith' expressions.`);
       return "(" + synthattribute(i[1]) + "=" + synthvalue(i[2]) + "*)";
     case "endswith":
       assert(l === 3);
+      assert(!b.has(i[1]), `'${i[1]} is a boolean attribute and is not allowed in 'endswith' expressions.`);
       return "(" + synthattribute(i[1]) + "=*" + synthvalue(i[2]) + ")";
     case "contains":
       assert(l === 3);
+      assert(!b.has(i[1]), `'${i[1]} is a boolean attribute and is not allowed in 'contains' expressions.`);
       return "(" + synthattribute(i[1]) + "=*" + synthvalue(i[2]) + "*)";
     case "has":
       assert(l === 2);
@@ -160,17 +170,17 @@ function ldapfilter(i) {
         if (arrValue.length === 0) {
           // We're asked to match at least one of zero possibilities.
           // This means matching no objects.
-          return ldapfilter(["false"]);
+          return ldapfilter(["false"], b);
         }
         // if arrValue has at least one element:
-        return ldapfilter(["or", ..._.map(arrValue, val => ["equals", attribute, val])]);
+        return ldapfilter(["or", ..._.map(arrValue, val => ["equals", attribute, val])], b);
       }
     case "true":
       assert(l === 1);
-      return ldapfilter(["has", "objectClass"]);
+      return ldapfilter(["has", "objectClass"], b);
     case "false":
       assert(l === 1);
-      return ldapfilter(["not", ["true"]]);
+      return ldapfilter(["not", ["true"]], b);
     default:
       throw Error("Error in LDAP filter expression");
   }
