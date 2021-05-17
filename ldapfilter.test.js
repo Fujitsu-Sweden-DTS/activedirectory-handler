@@ -81,17 +81,17 @@ describe("Test that ldap filter expressions are correctly synthesized", () => {
     },
     {
       //
-      str: "(|(abc=def\\29)(|(abc=ghi)(abc=jkl)))",
+      str: "(|(abc=def\\29)(abc=ghi)(abc=jkl))",
       exp: ["oneof", "abc", ["def)", "ghi", "jkl"]],
     },
     {
       //
-      str: "(&(aa=bb)(&(cc=dd)(ee=ff)))",
+      str: "(&(aa=bb)(cc=dd)(ee=ff))",
       exp: ["and", ["equals", "aa", "bb"], ["equals", "cc", "dd"], ["equals", "ee", "ff"]],
     },
     {
       //
-      str: "(|(aa=bb)(|(cc=dd)(ee=ff)))",
+      str: "(|(aa=bb)(cc=dd)(ee=ff))",
       exp: ["or", ["equals", "aa", "bb"], ["equals", "cc", "dd"], ["equals", "ee", "ff"]],
     },
     {
@@ -121,12 +121,12 @@ describe("Test that ldap filter expressions are correctly synthesized", () => {
     },
     {
       //
-      str: "(&(aa=aa)(&(aa=bb)(aa=cc)))",
+      str: "(&(aa=aa)(aa=bb)(aa=cc))",
       exp: ["and", ["equals", "aa", "aa"], ["equals", "aa", "bb"], ["equals", "aa", "cc"]],
     },
     {
       //
-      str: "(&(&(aa=aa)(aa=bb))(&(aa=cc)(aa=dd)))",
+      str: "(&(aa=aa)(aa=bb)(aa=cc)(aa=dd))",
       exp: ["and", ["equals", "aa", "aa"], ["equals", "aa", "bb"], ["equals", "aa", "cc"], ["equals", "aa", "dd"]],
     },
     {
@@ -141,12 +141,12 @@ describe("Test that ldap filter expressions are correctly synthesized", () => {
     },
     {
       //
-      str: "(|(aa=aa)(|(aa=bb)(aa=cc)))",
+      str: "(|(aa=aa)(aa=bb)(aa=cc))",
       exp: ["or", ["equals", "aa", "aa"], ["equals", "aa", "bb"], ["equals", "aa", "cc"]],
     },
     {
       //
-      str: "(|(|(aa=aa)(aa=bb))(|(aa=cc)(aa=dd)))",
+      str: "(|(aa=aa)(aa=bb)(aa=cc)(aa=dd))",
       exp: ["or", ["equals", "aa", "aa"], ["equals", "aa", "bb"], ["equals", "aa", "cc"], ["equals", "aa", "dd"]],
     },
     {
@@ -167,17 +167,17 @@ describe("Test that ldap filter expressions are correctly synthesized", () => {
     // Test that ldapfilter does not cause stack overflow
     {
       //
-      str: iter(14, x => `(|${x}${x})`, "(ab=cd)"),
+      str: "(|" + iter(14, x => `${x}${x}`, "(ab=cd)") + ")",
       exp: ["oneof", "ab", iter(2 ** 14, x => ["cd", ...x], [])],
     },
     {
       //
-      str: iter(14, x => `(|${x}${x})`, "(ab=cd)"),
+      str: "(|" + iter(14, x => `${x}${x}`, "(ab=cd)") + ")",
       exp: iter(2 ** 14, x => [...x, ["equals", "ab", "cd"]], ["or"]),
     },
     {
       //
-      str: iter(14, x => `(&${x}${x})`, "(ab=cd)"),
+      str: "(&" + iter(14, x => `${x}${x}`, "(ab=cd)") + ")",
       exp: iter(2 ** 14, x => [...x, ["equals", "ab", "cd"]], ["and"]),
     },
   ];

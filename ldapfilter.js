@@ -122,21 +122,12 @@ function ldapfilter(i) {
   switch (op) {
     case "and":
     case "or":
-      // We might get "and" and "or" expressions with a lot of arguments. A
-      // recursive solution with stack depth linear in input size would cause
-      // the stack to overflow. A solution with constant stack depth that
-      // creates an LDAP filter expression with a depth that is linear in input
-      // size would cause a stack overflow internally in ldapjs. The solution
-      // below has a stack depth logarithmic in input size and creates an LDAP
-      // filter with that same depth.
+      // The '&' and '|' syntax allows any number of operands >= 1, but let's use it only with at least 2.
       assert(l >= 2);
       if (l === 2) {
         return ldapfilter(i[1]);
       }
-      {
-        let midpoint = Math.ceil(l / 2);
-        return "(" + { and: "&", or: "|" }[op] + ldapfilter([op, ..._.slice(i, 1, midpoint)]) + ldapfilter([op, ..._.slice(i, midpoint)]) + ")";
-      }
+      return "(" + { and: "&", or: "|" }[op] + _.map(_.slice(i, 1), ldapfilter).join("") + ")";
     case "not":
       assert(l === 2);
       return "(!" + ldapfilter(i[1]) + ")";
