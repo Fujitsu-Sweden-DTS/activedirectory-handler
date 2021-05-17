@@ -164,7 +164,7 @@ class ActiveDirectoryHandler {
       } else if (item.isSingleValued === "FALSE" || item.isSingleValued === false) {
         isv = false;
       } else {
-        throw utils.err({ message: "Could not determine whether ldap attribute is single-valued.", item });
+        throw utils.err("Could not determine whether ldap attribute is single-valued.", { item });
       }
       if (item.lDAPDisplayName in this.isSingleValued) {
         if (_.includes(attributesNeededForInitialization, item.lDAPDisplayName)) {
@@ -336,7 +336,7 @@ class ActiveDirectoryHandler {
               ret.member = members;
               continue;
             }
-            throw utils.err({ message: "Got attribute without asking for it.", attrib });
+            throw utils.err("Got attribute without asking for it.", { attrib });
           }
           let value = obj[attrib];
           if (this.isSingleValued[attrib] === false) {
