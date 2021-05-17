@@ -1,6 +1,7 @@
 "use strict";
 /* global describe, test, expect */
 const _ = require("lodash");
+const assert = require("assert");
 const ldapfilter = require("./ldapfilter.js");
 
 function iter(n, fun, arg) {
@@ -42,101 +43,152 @@ describe("Test that erroneous ldap filter expressions won't be accepted", () => 
   }
 });
 
-describe("Test that ldap filter expressions are correctly synthesized and that ldapfilter does not alter it's argument", () => {
-  var test_synthesized_ldap_filters = [
-    "(&(cn=lkj\\2a\\28)(cn=lkj\\2a\\28*))",
-    ["and", ["equals", "cn", "lkj*("], ["beginswith", "cn", "lkj*("]],
-
-    '(|(!(name=*Qwer*))(&(&(cn=*)(&(displayName=*Qwer\\29\\28 /"*)(&(name=_A*)(givenName=*P.\\29))))(!(uid=*))))',
-    [
-      "or",
-      ["not", ["contains", "name", "Qwer"]],
-      ["and", ["and", ["has", "cn"], ["and", ["contains", "displayName", 'Qwer)( /"'], ["and", ["beginswith", "name", "_A"], ["endswith", "givenName", "P.)"]]]], ["not", ["has", "uid"]]],
-    ],
-
-    "(name=[]{}<>\\28\\29=\\2a\\00\\5cÅÄÖåäö)",
-    ["equals", "name", "[]{}<>()=*\u0000\\ÅÄÖåäö"],
-
-    "(thisisnotanattributethatshouldexist=*)",
-    ["oneof", "abc", []],
-
-    "(abc=def)",
-    ["oneof", "abc", ["def"]],
-
-    "(|(abc=def)(abc=ghi\\28))",
-    ["oneof", "abc", ["def", "ghi("]],
-
-    "(|(abc=def\\29)(|(abc=ghi)(abc=jkl)))",
-    ["oneof", "abc", ["def)", "ghi", "jkl"]],
-
-    "(&(aa=bb)(&(cc=dd)(ee=ff)))",
-    ["and", ["equals", "aa", "bb"], ["equals", "cc", "dd"], ["equals", "ee", "ff"]],
-
-    "(|(aa=bb)(|(cc=dd)(ee=ff)))",
-    ["or", ["equals", "aa", "bb"], ["equals", "cc", "dd"], ["equals", "ee", "ff"]],
-
-    "(cn=abc)",
-    ["and", ["equals", "cn", "abc"]],
-
-    "(cn=abc)",
-    ["or", ["equals", "cn", "abc"]],
-
-    "(abcDef1=abc)",
-    ["equals", "abcDef1", "abc"],
-
-    "(aa=aa)",
-    ["and", ["equals", "aa", "aa"]],
-
-    "(&(aa=aa)(aa=bb))",
-    ["and", ["equals", "aa", "aa"], ["equals", "aa", "bb"]],
-
-    "(&(aa=aa)(&(aa=bb)(aa=cc)))",
-    ["and", ["equals", "aa", "aa"], ["equals", "aa", "bb"], ["equals", "aa", "cc"]],
-
-    "(&(&(aa=aa)(aa=bb))(&(aa=cc)(aa=dd)))",
-    ["and", ["equals", "aa", "aa"], ["equals", "aa", "bb"], ["equals", "aa", "cc"], ["equals", "aa", "dd"]],
-
-    "(aa=aa)",
-    ["or", ["equals", "aa", "aa"]],
-
-    "(|(aa=aa)(aa=bb))",
-    ["or", ["equals", "aa", "aa"], ["equals", "aa", "bb"]],
-
-    "(|(aa=aa)(|(aa=bb)(aa=cc)))",
-    ["or", ["equals", "aa", "aa"], ["equals", "aa", "bb"], ["equals", "aa", "cc"]],
-
-    "(|(|(aa=aa)(aa=bb))(|(aa=cc)(aa=dd)))",
-    ["or", ["equals", "aa", "aa"], ["equals", "aa", "bb"], ["equals", "aa", "cc"], ["equals", "aa", "dd"]],
-
-    "(msds-Something=abc)",
-    ["equals", "msds-Something", "abc"],
-
-    "(msExchMobileRemoteDocumentsInternalDomainSuffixList=abc)",
-    ["equals", "msExchMobileRemoteDocumentsInternalDomainSuffixList", "abc"],
-
-    "(aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa=abc)",
-    ["equals", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "abc"],
-
+describe("Test that ldap filter expressions are correctly synthesized", () => {
+  const test_cases = [
+    {
+      //
+      str: "(&(cn=lkj\\2a\\28)(cn=lkj\\2a\\28*))",
+      exp: ["and", ["equals", "cn", "lkj*("], ["beginswith", "cn", "lkj*("]],
+    },
+    {
+      //
+      str: '(|(!(name=*Qwer*))(&(&(cn=*)(&(displayName=*Qwer\\29\\28 /"*)(&(name=_A*)(givenName=*P.\\29))))(!(uid=*))))',
+      exp: [
+        "or",
+        ["not", ["contains", "name", "Qwer"]],
+        ["and", ["and", ["has", "cn"], ["and", ["contains", "displayName", 'Qwer)( /"'], ["and", ["beginswith", "name", "_A"], ["endswith", "givenName", "P.)"]]]], ["not", ["has", "uid"]]],
+      ],
+    },
+    {
+      //
+      str: "(name=[]{}<>\\28\\29=\\2a\\00\\5cÅÄÖåäö)",
+      exp: ["equals", "name", "[]{}<>()=*\u0000\\ÅÄÖåäö"],
+    },
+    {
+      //
+      str: "(thisisnotanattributethatshouldexist=*)",
+      exp: ["oneof", "abc", []],
+    },
+    {
+      //
+      str: "(abc=def)",
+      exp: ["oneof", "abc", ["def"]],
+    },
+    {
+      //
+      str: "(|(abc=def)(abc=ghi\\28))",
+      exp: ["oneof", "abc", ["def", "ghi("]],
+    },
+    {
+      //
+      str: "(|(abc=def\\29)(|(abc=ghi)(abc=jkl)))",
+      exp: ["oneof", "abc", ["def)", "ghi", "jkl"]],
+    },
+    {
+      //
+      str: "(&(aa=bb)(&(cc=dd)(ee=ff)))",
+      exp: ["and", ["equals", "aa", "bb"], ["equals", "cc", "dd"], ["equals", "ee", "ff"]],
+    },
+    {
+      //
+      str: "(|(aa=bb)(|(cc=dd)(ee=ff)))",
+      exp: ["or", ["equals", "aa", "bb"], ["equals", "cc", "dd"], ["equals", "ee", "ff"]],
+    },
+    {
+      //
+      str: "(cn=abc)",
+      exp: ["and", ["equals", "cn", "abc"]],
+    },
+    {
+      //
+      str: "(cn=abc)",
+      exp: ["or", ["equals", "cn", "abc"]],
+    },
+    {
+      //
+      str: "(abcDef1=abc)",
+      exp: ["equals", "abcDef1", "abc"],
+    },
+    {
+      //
+      str: "(aa=aa)",
+      exp: ["and", ["equals", "aa", "aa"]],
+    },
+    {
+      //
+      str: "(&(aa=aa)(aa=bb))",
+      exp: ["and", ["equals", "aa", "aa"], ["equals", "aa", "bb"]],
+    },
+    {
+      //
+      str: "(&(aa=aa)(&(aa=bb)(aa=cc)))",
+      exp: ["and", ["equals", "aa", "aa"], ["equals", "aa", "bb"], ["equals", "aa", "cc"]],
+    },
+    {
+      //
+      str: "(&(&(aa=aa)(aa=bb))(&(aa=cc)(aa=dd)))",
+      exp: ["and", ["equals", "aa", "aa"], ["equals", "aa", "bb"], ["equals", "aa", "cc"], ["equals", "aa", "dd"]],
+    },
+    {
+      //
+      str: "(aa=aa)",
+      exp: ["or", ["equals", "aa", "aa"]],
+    },
+    {
+      //
+      str: "(|(aa=aa)(aa=bb))",
+      exp: ["or", ["equals", "aa", "aa"], ["equals", "aa", "bb"]],
+    },
+    {
+      //
+      str: "(|(aa=aa)(|(aa=bb)(aa=cc)))",
+      exp: ["or", ["equals", "aa", "aa"], ["equals", "aa", "bb"], ["equals", "aa", "cc"]],
+    },
+    {
+      //
+      str: "(|(|(aa=aa)(aa=bb))(|(aa=cc)(aa=dd)))",
+      exp: ["or", ["equals", "aa", "aa"], ["equals", "aa", "bb"], ["equals", "aa", "cc"], ["equals", "aa", "dd"]],
+    },
+    {
+      //
+      str: "(msds-Something=abc)",
+      exp: ["equals", "msds-Something", "abc"],
+    },
+    {
+      //
+      str: "(msExchMobileRemoteDocumentsInternalDomainSuffixList=abc)",
+      exp: ["equals", "msExchMobileRemoteDocumentsInternalDomainSuffixList", "abc"],
+    },
+    {
+      //
+      str: "(aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa=abc)",
+      exp: ["equals", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "abc"],
+    },
     // Test that ldapfilter does not cause stack overflow
-
-    iter(14, x => `(|${x}${x})`, "(ab=cd)"),
-    ["oneof", "ab", iter(2 ** 14, x => ["cd", ...x], [])],
-
-    iter(14, x => `(|${x}${x})`, "(ab=cd)"),
-    iter(2 ** 14, x => [...x, ["equals", "ab", "cd"]], ["or"]),
-
-    iter(14, x => `(&${x}${x})`, "(ab=cd)"),
-    iter(2 ** 14, x => [...x, ["equals", "ab", "cd"]], ["and"]),
+    {
+      //
+      str: iter(14, x => `(|${x}${x})`, "(ab=cd)"),
+      exp: ["oneof", "ab", iter(2 ** 14, x => ["cd", ...x], [])],
+    },
+    {
+      //
+      str: iter(14, x => `(|${x}${x})`, "(ab=cd)"),
+      exp: iter(2 ** 14, x => [...x, ["equals", "ab", "cd"]], ["or"]),
+    },
+    {
+      //
+      str: iter(14, x => `(&${x}${x})`, "(ab=cd)"),
+      exp: iter(2 ** 14, x => [...x, ["equals", "ab", "cd"]], ["and"]),
+    },
   ];
-  let tests = _.chunk(test_synthesized_ldap_filters, 2);
-  for (let xindex = 0; xindex < tests.length; xindex++) {
-    let x = tests[xindex];
-    test("" + xindex, () => {
-      const [expected_filterstring, filterexpression] = x;
+  for (const [index, test_case] of test_cases.entries()) {
+    assert(_.isEqual(_.omit(test_case, ["str", "exp"]), {}));
+    test("" + index, () => {
+      const { str: expected_filterstring, exp: filterexpression } = test_case;
       const filterexpression_clone = _.cloneDeep(filterexpression);
       const actual_filterstring = ldapfilter(filterexpression);
-      expect(actual_filterstring).toBe(expected_filterstring);
-      expect(filterexpression).toEqual(filterexpression_clone);
+      expect(actual_filterstring).toBe(expected_filterstring); // Test that ldapfilter synthesizes correctly
+      expect(filterexpression).toEqual(filterexpression_clone); // Test that ldapfilter does not alter its argument
     });
   }
 });
