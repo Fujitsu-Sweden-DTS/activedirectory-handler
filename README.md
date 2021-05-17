@@ -81,7 +81,7 @@ A filter expression in this [DSL/mini-language](https://en.wikipedia.org/wiki/Do
 It has the following grammar:
 
 ```
-     <expression> := <and> | <or> | <not> | <equals> | <beginswith> | <endswith> | <contains> | <has> | <oneof>
+     <expression> := <and> | <or> | <not> | <equals> | <beginswith> | <endswith> | <contains> | <has> | <oneof> | <true> | <false>
      <and>        := ["and", <expression>, <expression>, ...]
      <or>         := ["or", <expression>, <expression>, ...]
      <not>        := ["not", <expression>]
@@ -91,6 +91,8 @@ It has the following grammar:
      <contains>   := ["contains", <attribute>, <value>]
      <has>        := ["has", <attribute>]
      <oneof>      := ["oneof", <attribute>, <arrValue>]
+     <true>       := ["true"]
+     <false>      := ["false"]
      <attribute>  := A string matching /^[a-z][A-Za-z0-9-]{1,59}$/ i.e. 1-60 English alphanumeric characters or dashes, the first of which is a lower-case letter
      <value>      := A string matching /^.{1,255}$/ i.e. with a length in the interval [1, 255]
      <arrValue>   := An array with zero or more items, each of which a <value>
@@ -108,6 +110,8 @@ The semantics are as follows:
      ["contains", A, V]:   True if the object has an attribute A with a value that contains V as a substring, or a multi-valued attribute A where at least one of the values contains V as a substring.
      ["has", A]:           True if the object has an attribute A with any value.
      ["oneof", A, arrV]:   True if the object has an attribute A with a value that equals at least one of the elements of arrV, or a multi-valued attribute A where at least one of the values equals at least one of the elements of arrV.
+     ["true"]:             Always true.
+     ["false"]:            Always false.
 ```
 
 Note that the expressions `beginswith`, `endswith` and `contains`, cannot be used with DN attributes. See details [here](https://social.technet.microsoft.com/wiki/contents/articles/5392.active-directory-ldap-syntax-filters.aspx)

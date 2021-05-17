@@ -35,6 +35,8 @@ describe("Test that erroneous ldap filter expressions won't be accepted", () => 
     ["oneof", "abc", 123], // arrValue must be an array
     ["oneof", "abc", [["abc"]]], // arrValue elements must be valid values
     ["oneof", "abc", [123]], // arrValue elements must be valid values
+    ["true", "anything"], // true has no operands
+    ["false", "anything"], // false has no operands
   ];
   for (let bad of test_erroneous_ldap_filters) {
     test(JSON.stringify(bad), () => {
@@ -66,7 +68,7 @@ describe("Test that ldap filter expressions are correctly synthesized", () => {
     },
     {
       //
-      str: "(thisisnotanattributethatshouldexist=*)",
+      str: "(!(objectClass=*))",
       exp: ["oneof", "abc", []],
     },
     {
@@ -163,6 +165,16 @@ describe("Test that ldap filter expressions are correctly synthesized", () => {
       //
       str: "(aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa=abc)",
       exp: ["equals", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "abc"],
+    },
+    {
+      //
+      str: "(objectClass=*)",
+      exp: ["true"],
+    },
+    {
+      //
+      str: "(!(objectClass=*))",
+      exp: ["false"],
     },
     // Test that ldapfilter does not cause stack overflow
     {

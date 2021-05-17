@@ -53,7 +53,8 @@ function _escape(inp) {
 //     grammar:
 //
 //     <expression> := <and> | <or> | <not> | <equals> | <beginswith> |
-//                     <endswith> | <contains> | <has> | <oneof>
+//                     <endswith> | <contains> | <has> | <oneof> | <true> |
+//                     <false>
 //     <and>        := ["and", <expression>, <expression>, ...]
 //     <or>         := ["or", <expression>, <expression>, ...]
 //     <not>        := ["not", <expression>]
@@ -63,6 +64,8 @@ function _escape(inp) {
 //     <contains>   := ["contains", <attribute>, <value>]
 //     <has>        := ["has", <attribute>]
 //     <oneof>      := ["oneof", <attribute>, <arrValue>]
+//     <true>       := ["true"]
+//     <false>      := ["false"]
 //     <attribute>  := A string matching /^[a-z][A-Za-z0-9-]{1,59}$/ i.e. 1-60
 //                     English alphanumeric characters or dashes, the first of
 //                     which is a lower-case letter.
@@ -95,6 +98,8 @@ function _escape(inp) {
 //                           or a multi-valued attribute A where at least one of
 //                           the values equals at least one of the elements of
 //                           arrV.
+//     ["true"]:             Always true.
+//     ["false"]:            Always false.
 //
 // Note that the expressions beginswith, endswith and contains, cannot be used
 // with DN attributes. See:
@@ -155,11 +160,17 @@ function ldapfilter(i) {
         if (arrValue.length === 0) {
           // We're asked to match at least one of zero possibilities.
           // This means matching no objects.
-          return ldapfilter(["has", "thisisnotanattributethatshouldexist"]);
+          return ldapfilter(["false"]);
         }
         // if arrValue has at least one element:
         return ldapfilter(["or", ..._.map(arrValue, val => ["equals", attribute, val])]);
       }
+    case "true":
+      assert(l === 1);
+      return ldapfilter(["has", "objectClass"]);
+    case "false":
+      assert(l === 1);
+      return ldapfilter(["not", ["true"]]);
     default:
       throw Error("Error in LDAP filter expression");
   }

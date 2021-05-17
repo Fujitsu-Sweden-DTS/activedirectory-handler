@@ -198,7 +198,7 @@ class activedirectoryHandler {
     await this.log.debug({ m: "Initialized activedirectoryHandler", time: new Date() - starttime }, req);
   }
 
-  async *getObjects({ select = [], from = this.domainBaseDN, where = ["has", "objectClass"], scope = "sub", req, waitForInitialization = true } = {}) {
+  async *getObjects({ select = [], from = this.domainBaseDN, where = ["true"], scope = "sub", req, waitForInitialization = true } = {}) {
     // Some validation
     assert(_.isArray(select) && 1 <= _.size(select) && _.every(select, _.isString), "select must be a non-empty array of strings");
     assert(
