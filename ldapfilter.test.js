@@ -3,6 +3,7 @@
 const _ = require("lodash");
 const assert = require("assert");
 const ldapfilter = require("./ldapfilter.js");
+const ldapjs = require("ldapjs");
 
 function iter(n, fun, arg) {
   while (n) {
@@ -51,6 +52,7 @@ describe("Test that ldap filter expressions are correctly synthesized", () => {
       //
       str: "(&(cn=lkj\\2a\\28)(cn=lkj\\2a\\28*))",
       exp: ["and", ["equals", "cn", "lkj*("], ["beginswith", "cn", "lkj*("]],
+      obj: new ldapjs.AndFilter({ filters: [new ldapjs.EqualityFilter({ attribute: "cn", value: "lkj*(" }), new ldapjs.SubstringFilter({ attribute: "cn", initial: "lkj*(" })] }),
     },
     {
       //
@@ -60,147 +62,243 @@ describe("Test that ldap filter expressions are correctly synthesized", () => {
         ["not", ["contains", "name", "Qwer"]],
         ["and", ["and", ["has", "cn"], ["and", ["contains", "displayName", 'Qwer)( /"'], ["and", ["beginswith", "name", "_A"], ["endswith", "givenName", "P.)"]]]], ["not", ["has", "uid"]]],
       ],
+      obj: new ldapjs.OrFilter({
+        filters: [
+          new ldapjs.NotFilter({ filter: new ldapjs.SubstringFilter({ attribute: "name", any: ["Qwer"] }) }),
+          new ldapjs.AndFilter({
+            filters: [
+              new ldapjs.AndFilter({
+                filters: [
+                  new ldapjs.PresenceFilter({ attribute: "cn" }),
+                  new ldapjs.AndFilter({
+                    filters: [
+                      new ldapjs.SubstringFilter({ attribute: "displayName", any: ['Qwer)( /"'] }),
+                      new ldapjs.AndFilter({ filters: [new ldapjs.SubstringFilter({ attribute: "name", initial: "_A" }), new ldapjs.SubstringFilter({ attribute: "givenName", final: "P.)" })] }),
+                    ],
+                  }),
+                ],
+              }),
+              new ldapjs.NotFilter({ filter: new ldapjs.PresenceFilter({ attribute: "uid" }) }),
+            ],
+          }),
+        ],
+      }),
     },
     {
       //
       str: "(name=[]{}<>\\28\\29=\\2a\\00\\5cÅÄÖåäö)",
       exp: ["equals", "name", "[]{}<>()=*\u0000\\ÅÄÖåäö"],
+      obj: new ldapjs.EqualityFilter({ attribute: "name", value: "[]{}<>()=*\u0000\\ÅÄÖåäö" }),
     },
     {
       //
       str: "(!(objectClass=*))",
       exp: ["oneof", "abc", []],
+      obj: new ldapjs.NotFilter({ filter: new ldapjs.PresenceFilter({ attribute: "objectClass" }) }),
     },
     {
       //
       str: "(abc=def)",
       exp: ["oneof", "abc", ["def"]],
+      obj: new ldapjs.EqualityFilter({ attribute: "abc", value: "def" }),
     },
     {
       //
       str: "(|(abc=def)(abc=ghi\\28))",
       exp: ["oneof", "abc", ["def", "ghi("]],
+      obj: new ldapjs.OrFilter({ filters: [new ldapjs.EqualityFilter({ attribute: "abc", value: "def" }), new ldapjs.EqualityFilter({ attribute: "abc", value: "ghi(" })] }),
     },
     {
       //
       str: "(|(abc=def\\29)(abc=ghi)(abc=jkl))",
       exp: ["oneof", "abc", ["def)", "ghi", "jkl"]],
+      obj: new ldapjs.OrFilter({
+        filters: [
+          new ldapjs.EqualityFilter({ attribute: "abc", value: "def)" }),
+          new ldapjs.EqualityFilter({ attribute: "abc", value: "ghi" }),
+          new ldapjs.EqualityFilter({ attribute: "abc", value: "jkl" }),
+        ],
+      }),
     },
     {
       //
       str: "(&(aa=bb)(cc=dd)(ee=ff))",
       exp: ["and", ["equals", "aa", "bb"], ["equals", "cc", "dd"], ["equals", "ee", "ff"]],
+      obj: new ldapjs.AndFilter({
+        filters: [
+          new ldapjs.EqualityFilter({ attribute: "aa", value: "bb" }),
+          new ldapjs.EqualityFilter({ attribute: "cc", value: "dd" }),
+          new ldapjs.EqualityFilter({ attribute: "ee", value: "ff" }),
+        ],
+      }),
     },
     {
       //
       str: "(|(aa=bb)(cc=dd)(ee=ff))",
       exp: ["or", ["equals", "aa", "bb"], ["equals", "cc", "dd"], ["equals", "ee", "ff"]],
+      obj: new ldapjs.OrFilter({
+        filters: [
+          new ldapjs.EqualityFilter({ attribute: "aa", value: "bb" }),
+          new ldapjs.EqualityFilter({ attribute: "cc", value: "dd" }),
+          new ldapjs.EqualityFilter({ attribute: "ee", value: "ff" }),
+        ],
+      }),
     },
     {
       //
       str: "(cn=abc)",
       exp: ["and", ["equals", "cn", "abc"]],
+      obj: new ldapjs.EqualityFilter({ attribute: "cn", value: "abc" }),
     },
     {
       //
       str: "(cn=abc)",
       exp: ["or", ["equals", "cn", "abc"]],
+      obj: new ldapjs.EqualityFilter({ attribute: "cn", value: "abc" }),
     },
     {
       //
       str: "(abcDef1=abc)",
       exp: ["equals", "abcDef1", "abc"],
+      obj: new ldapjs.EqualityFilter({ attribute: "abcDef1", value: "abc" }),
     },
     {
       //
       str: "(aa=aa)",
       exp: ["and", ["equals", "aa", "aa"]],
+      obj: new ldapjs.EqualityFilter({ attribute: "aa", value: "aa" }),
     },
     {
       //
       str: "(&(aa=aa)(aa=bb))",
       exp: ["and", ["equals", "aa", "aa"], ["equals", "aa", "bb"]],
+      obj: new ldapjs.AndFilter({ filters: [new ldapjs.EqualityFilter({ attribute: "aa", value: "aa" }), new ldapjs.EqualityFilter({ attribute: "aa", value: "bb" })] }),
     },
     {
       //
       str: "(&(aa=aa)(aa=bb)(aa=cc))",
       exp: ["and", ["equals", "aa", "aa"], ["equals", "aa", "bb"], ["equals", "aa", "cc"]],
+      obj: new ldapjs.AndFilter({
+        filters: [
+          new ldapjs.EqualityFilter({ attribute: "aa", value: "aa" }),
+          new ldapjs.EqualityFilter({ attribute: "aa", value: "bb" }),
+          new ldapjs.EqualityFilter({ attribute: "aa", value: "cc" }),
+        ],
+      }),
     },
     {
       //
       str: "(&(aa=aa)(aa=bb)(aa=cc)(aa=dd))",
       exp: ["and", ["equals", "aa", "aa"], ["equals", "aa", "bb"], ["equals", "aa", "cc"], ["equals", "aa", "dd"]],
+      obj: new ldapjs.AndFilter({
+        filters: [
+          new ldapjs.EqualityFilter({ attribute: "aa", value: "aa" }),
+          new ldapjs.EqualityFilter({ attribute: "aa", value: "bb" }),
+          new ldapjs.EqualityFilter({ attribute: "aa", value: "cc" }),
+          new ldapjs.EqualityFilter({ attribute: "aa", value: "dd" }),
+        ],
+      }),
     },
     {
       //
       str: "(aa=aa)",
       exp: ["or", ["equals", "aa", "aa"]],
+      obj: new ldapjs.EqualityFilter({ attribute: "aa", value: "aa" }),
     },
     {
       //
       str: "(|(aa=aa)(aa=bb))",
       exp: ["or", ["equals", "aa", "aa"], ["equals", "aa", "bb"]],
+      obj: new ldapjs.OrFilter({ filters: [new ldapjs.EqualityFilter({ attribute: "aa", value: "aa" }), new ldapjs.EqualityFilter({ attribute: "aa", value: "bb" })] }),
     },
     {
       //
       str: "(|(aa=aa)(aa=bb)(aa=cc))",
       exp: ["or", ["equals", "aa", "aa"], ["equals", "aa", "bb"], ["equals", "aa", "cc"]],
+      obj: new ldapjs.OrFilter({
+        filters: [
+          new ldapjs.EqualityFilter({ attribute: "aa", value: "aa" }),
+          new ldapjs.EqualityFilter({ attribute: "aa", value: "bb" }),
+          new ldapjs.EqualityFilter({ attribute: "aa", value: "cc" }),
+        ],
+      }),
     },
     {
       //
       str: "(|(aa=aa)(aa=bb)(aa=cc)(aa=dd))",
       exp: ["or", ["equals", "aa", "aa"], ["equals", "aa", "bb"], ["equals", "aa", "cc"], ["equals", "aa", "dd"]],
+      obj: new ldapjs.OrFilter({
+        filters: [
+          new ldapjs.EqualityFilter({ attribute: "aa", value: "aa" }),
+          new ldapjs.EqualityFilter({ attribute: "aa", value: "bb" }),
+          new ldapjs.EqualityFilter({ attribute: "aa", value: "cc" }),
+          new ldapjs.EqualityFilter({ attribute: "aa", value: "dd" }),
+        ],
+      }),
     },
     {
       //
       str: "(msds-Something=abc)",
       exp: ["equals", "msds-Something", "abc"],
+      obj: new ldapjs.EqualityFilter({ attribute: "msds-Something", value: "abc" }),
     },
     {
       //
       str: "(msExchMobileRemoteDocumentsInternalDomainSuffixList=abc)",
       exp: ["equals", "msExchMobileRemoteDocumentsInternalDomainSuffixList", "abc"],
+      obj: new ldapjs.EqualityFilter({ attribute: "msExchMobileRemoteDocumentsInternalDomainSuffixList", value: "abc" }),
     },
     {
       //
       str: "(aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa=abc)",
       exp: ["equals", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "abc"],
+      obj: new ldapjs.EqualityFilter({ attribute: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", value: "abc" }),
     },
     {
       //
       str: "(objectClass=*)",
       exp: ["true"],
+      obj: new ldapjs.PresenceFilter({ attribute: "objectClass" }),
     },
     {
       //
       str: "(!(objectClass=*))",
       exp: ["false"],
+      obj: new ldapjs.NotFilter({ filter: new ldapjs.PresenceFilter({ attribute: "objectClass" }) }),
     },
     // Test that ldapfilter does not cause stack overflow
     {
       //
       str: "(|" + iter(14, x => `${x}${x}`, "(ab=cd)") + ")",
       exp: ["oneof", "ab", iter(2 ** 14, x => ["cd", ...x], [])],
+      obj: new ldapjs.OrFilter({ filters: iter(2 ** 14, x => [...x, new ldapjs.EqualityFilter({ attribute: "ab", value: "cd" })], []) }),
     },
     {
       //
       str: "(|" + iter(14, x => `${x}${x}`, "(ab=cd)") + ")",
       exp: iter(2 ** 14, x => [...x, ["equals", "ab", "cd"]], ["or"]),
+      obj: new ldapjs.OrFilter({ filters: iter(2 ** 14, x => [...x, new ldapjs.EqualityFilter({ attribute: "ab", value: "cd" })], []) }),
     },
     {
       //
       str: "(&" + iter(14, x => `${x}${x}`, "(ab=cd)") + ")",
       exp: iter(2 ** 14, x => [...x, ["equals", "ab", "cd"]], ["and"]),
+      obj: new ldapjs.AndFilter({ filters: iter(2 ** 14, x => [...x, new ldapjs.EqualityFilter({ attribute: "ab", value: "cd" })], []) }),
     },
   ];
   for (const [index, test_case] of test_cases.entries()) {
-    assert(_.isEqual(_.omit(test_case, ["str", "exp"]), {}));
+    assert(_.isEqual(_.omit(test_case, ["str", "exp", "obj"]), {}));
+    assert("str" in test_case);
+    assert("exp" in test_case);
+    assert("obj" in test_case);
     test("" + index, () => {
-      const { str: expected_filterstring, exp: filterexpression } = test_case;
+      const { str: expected_filterstring, exp: filterexpression, obj: ldapjs_filterobject } = test_case;
       const filterexpression_clone = _.cloneDeep(filterexpression);
       const actual_filterstring = ldapfilter(filterexpression);
+      const ldapjs_filterstring = ldapjs_filterobject.toString();
       expect(actual_filterstring).toBe(expected_filterstring); // Test that ldapfilter synthesizes correctly
       expect(filterexpression).toEqual(filterexpression_clone); // Test that ldapfilter does not alter its argument
+      expect(ldapjs_filterstring).toBe(expected_filterstring); // Use ldapjs to double-check that ldapfilter synthesizes correctly
     });
   }
 });
