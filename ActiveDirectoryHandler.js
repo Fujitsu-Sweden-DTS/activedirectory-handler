@@ -71,7 +71,7 @@ class ActiveDirectoryHandler {
     }
 
     // The application logger
-    assert(_.isObject(log), "log missing from activedirectory-handler config");
+    assert(_.isObject(log), "log missing from ActiveDirectoryHandler config");
     for (const fun of ["debug", "info", "warn", "error", "critical"]) {
       assert(_.isFunction(log[fun]), `log object must have a '${fun}' function.`);
     }
@@ -315,7 +315,7 @@ class ActiveDirectoryHandler {
           // The circumstances are:
           // - The search should be such that it would return an OU that contains objects you're not allowed to see.
           // - No filters that reference the value of any attributes may be used.
-          // - Filters for the existence of an attribute can be ok depending on what attribute it is.
+          // - Filters for the existence of an attribute can be OK depending on what attribute it is.
           // Here, we only detect the situation and throw an error.
           throw utils.err(
             "ldapjs parsed an entry with no attributes, when at least one attribute is expected. If you have no need to read this object, it is likely possible to fix this problem by choosing a more restrictive filter. Any filter that somehow restricts the value of an attribute should do; that seems to exclude objects read in this way.",
@@ -345,7 +345,7 @@ class ActiveDirectoryHandler {
               // interface for the price of a little more memory use.
               assert(select_includes_member, "Got incomplete member attribute without asking for members.");
               assert(_.isEqual(obj.member, []), "Got both complete and incomplete member attribute.");
-              assert(this.initialized, "Tried to get members before inizialization.");
+              assert(this.initialized, "Tried to get members before initialization.");
               const members = [];
               for await (const member of this.getObjects({
                 select: ["distinguishedName"],
