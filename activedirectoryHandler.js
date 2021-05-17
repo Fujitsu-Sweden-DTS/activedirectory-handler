@@ -67,6 +67,7 @@ class activedirectoryHandler {
     }
 
     // The application logger
+    assert(_.isObject(log), "log missing from activedirectory-handler config");
     for (const fun of ["debug", "info", "warn", "error", "critical"]) {
       assert(_.isFunction(log[fun]), `log object must have a '${fun}' function.`);
     }
