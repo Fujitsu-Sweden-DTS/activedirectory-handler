@@ -27,13 +27,17 @@ class ActiveDirectoryHandler {
     const {
       //
       domainBaseDN,
-      isSingleValued,
       log,
+      overrideSingleValued = {},
       password,
       schemaConfigBaseDN,
       url,
       user,
     } = activedirectoryHandlerConfig;
+    assert(
+      !("isSingleValued" in activedirectoryHandlerConfig),
+      "You included an invalid option `isSingleValued` in the config for ActiveDirectoryHandler. Did you perhaps mean `overrideSingleValued`?",
+    );
 
     // The Base DN for the domain
     assert(validDN(domainBaseDN), "domainBaseDN must be a valid DN");
@@ -47,23 +51,23 @@ class ActiveDirectoryHandler {
     // function below, so that multi-valued attributes are always set to an array.
     // In doing so, this map from attribute name to a bool indicating whether that
     // attribute is single-valued, is consulted. This map is populated by
-    // initialize by reading the AD server's schema. However, the isSingleValued
-    // option passed to the constructor will override the schema, and can be used
-    // for attributes that are multi-valued per schema definition but in practice
-    // are single-valued.
-    assert(_.isPlainObject(isSingleValued), "isSingleValued must be a plain object");
+    // initialize by reading the AD server's schema. However, the
+    // overrideSingleValued option passed to the constructor will override the
+    // schema, and can be used for attributes that are multi-valued per schema
+    // definition but in practice are single-valued.
+    assert(_.isPlainObject(overrideSingleValued), "overrideSingleValued must be a plain object");
     assert(
-      _.every(_.keys(isSingleValued), k => k.match(AttributeNameRE)),
-      `Every key in isSingleValued must match ${AttributeNameRE}.`,
+      _.every(_.keys(overrideSingleValued), k => k.match(AttributeNameRE)),
+      `Every key in overrideSingleValued must match ${AttributeNameRE}.`,
     );
     assert(
-      _.every(_.keys(isSingleValued), k => isSingleValued[k] === Boolean(isSingleValued[k])),
-      "Every value in isSingleValued must be a boolean.",
+      _.every(_.keys(overrideSingleValued), k => overrideSingleValued[k] === Boolean(overrideSingleValued[k])),
+      "Every value in overrideSingleValued must be a boolean.",
     );
-    this.isSingleValued = _.cloneDeep(isSingleValued);
+    this.dictSingleValued = _.cloneDeep(overrideSingleValued);
     for (const attrib of attributesNeededForInitialization) {
-      assert(!(attrib in this.isSingleValued), `You may not use isSingleValued to overload '${attrib}'.`);
-      this.isSingleValued[attrib] = true; // All of them are single-valued.
+      assert(!(attrib in this.dictSingleValued), `You may not include '${attrib}' in overrideSingleValued.`);
+      this.dictSingleValued[attrib] = true; // All of them are single-valued.
     }
 
     // The application logger
@@ -166,14 +170,14 @@ class ActiveDirectoryHandler {
       } else {
         throw utils.err("Could not determine whether ldap attribute is single-valued.", { item });
       }
-      if (item.lDAPDisplayName in this.isSingleValued) {
+      if (item.lDAPDisplayName in this.dictSingleValued) {
         if (_.includes(attributesNeededForInitialization, item.lDAPDisplayName)) {
           assert(isv, "Unexpected schema");
         } else {
-          assert(this.isSingleValued[item.lDAPDisplayName] !== isv, "Unnecessary isSingleValued overload or duplicate schema entry");
+          assert(this.dictSingleValued[item.lDAPDisplayName] !== isv, "Unnecessary entry in overrideSingleValued or duplicate schema entry");
         }
       } else {
-        this.isSingleValued[item.lDAPDisplayName] = isv;
+        this.dictSingleValued[item.lDAPDisplayName] = isv;
       }
       // Assign formatters
       if (item.lDAPDisplayName in this.extractionFormatters) {
@@ -193,7 +197,7 @@ class ActiveDirectoryHandler {
         await this.log.warn({ message: "Could not determine parsing method for ldap attribute", item }, req);
       }
     }
-    assert(this.isSingleValued.member === false);
+    assert(this.dictSingleValued.member === false);
     this.initialized = true;
     await this.log.debug({ m: "Initialized ActiveDirectoryHandler", time: new Date() - starttime }, req);
   }
@@ -223,7 +227,7 @@ class ActiveDirectoryHandler {
       assert(this.initialized);
       // Validate attributes against schema
       for (const attrib of select) {
-        assert(attrib in this.isSingleValued, `Refuse to fetch non-existent attribute '${attrib}'`);
+        assert(attrib in this.dictSingleValued, `Refuse to fetch non-existent attribute '${attrib}'`);
       }
     }
 
@@ -339,7 +343,7 @@ class ActiveDirectoryHandler {
             throw utils.err("Got attribute without asking for it.", { attrib });
           }
           let value = obj[attrib];
-          if (this.isSingleValued[attrib] === false) {
+          if (this.dictSingleValued[attrib] === false) {
             // Attribute is multi-valued
             if (_.isArray(value)) {
               // Attribute is multi-valued and value is array, as it should be. Do nothing.
@@ -352,7 +356,7 @@ class ActiveDirectoryHandler {
             if (attrib in formats) {
               value = _.map(_.zip(value, rawobj[attrib]), ([val, rawval]) => formats[attrib](val, rawval));
             }
-          } else if (this.isSingleValued[attrib] === true) {
+          } else if (this.dictSingleValued[attrib] === true) {
             // Attribute is single-valued
             if (_.isArray(value)) {
               throw Error(`Attribute '${attrib}' is single-valued, but value is an array.`);

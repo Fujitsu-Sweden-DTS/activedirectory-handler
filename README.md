@@ -36,7 +36,7 @@ const adHandler = new ActiveDirectoryHandler({
   domainBaseDN: "ou=MainOU,dc=your-domain,dc=example,dc=com",
   schemaConfigBaseDN: "cn=Schema,cn=Configuration,dc=your-domain,dc=example,dc=com",
   log,
-  isSingleValued: {
+  overrideSingleValued: {
     exampleAttribute: true,
   },
 });
@@ -47,7 +47,7 @@ Details for configuration options:
 * `domainBaseDN` will be used as the default value for the `from` option in searches, see below.
 * `log` is an object holding the following log functions: `debug`, `info`, `warn`, `error` and `critical`.
   Each log function should be an async function taking arguments `data` and `req`.
-* `isSingleValued`: Attributes will be treated as single- or multi-valued depending on their schema.
+* `overrideSingleValued`: Attributes will be treated as single- or multi-valued depending on their schema.
   This optional parameter can be used to override schema information.
   If `exampleAttribute` is declared in the AD schema as multi-valued but no entity has more than one such value and you don't want to deal with an array, you can force treating it as single-valued as in the example above.
 
