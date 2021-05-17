@@ -215,9 +215,6 @@ class ActiveDirectoryHandler {
     assert(!_.includes(select, "dn"), "ActiveDirectoryHandler.getObjects does not support selecting the field 'dn'. Did you perhaps mean 'distinguishedName'?");
     const select_includes_distinguishedName = _.includes(select, "distinguishedName");
     const select_includes_member = _.includes(select, "member");
-    if (select_includes_member) {
-      assert(select_includes_distinguishedName, "ActiveDirectoryHandler.getObjects does not support selecting the field 'member' without also selecting the field 'distinguishedName'");
-    }
 
     if (waitForInitialization) {
       // Ensure we are initialized
@@ -246,8 +243,9 @@ class ActiveDirectoryHandler {
       await bind(this.user, this.password);
 
       // Send query
+      const attributes = _.uniq([...select, "distinguishedName"]);
       const emitter = await search(from, {
-        attributes: select,
+        attributes,
         filter: ldapfilter(where),
         scope,
         paged: { pagePause: true },
@@ -312,6 +310,19 @@ class ActiveDirectoryHandler {
           assert(!(type in rawobj), "Unexpectedly, ldapjs returned either an entry for 'dn' or a duplicate entry.");
           rawobj[type] = _vals;
         }
+        if (entry.attributes.length === 0) {
+          // It seems that in some circumstances, LDAP servers can return entries with no attributes.
+          // The circumstances are:
+          // - The search should be such that it would return an OU that contains objects you're not allowed to see.
+          // - No filters that reference the value of any attributes may be used.
+          // - Filters for the existence of an attribute can be ok depending on what attribute it is.
+          // Here, we only detect the situation and throw an error.
+          throw utils.err(
+            "ldapjs parsed an entry with no attributes, when at least one attribute is expected. If you have no need to read this object, it is likely possible to fix this problem by choosing a more restrictive filter. Any filter that somehow restricts the value of an attribute should do; that seems to exclude objects read in this way.",
+            { distinguishedName: entry._dn },
+          );
+        }
+
         const ret = {};
         // Compensate for ldapjs's quirks, among those the failure to distinguish
         // between single- and multi-valued attributes, as documented above.
@@ -320,6 +331,12 @@ class ActiveDirectoryHandler {
             if (attrib === "controls" || attrib === "dn") {
               // controls and dn attributes are known to be returned without
               // having been asked for. We'll ignore those.
+              //
+              continue;
+            }
+            if (attrib === "distinguishedName" && !select_includes_distinguishedName) {
+              // We always ask for distinguishedName for internal reasons.
+              // However, in this case it shouldn't be included in ret.
               continue;
             }
             if (attrib.match(/^member;range=/u)) {
