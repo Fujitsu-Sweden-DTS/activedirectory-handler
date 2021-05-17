@@ -22,7 +22,7 @@ function validDN(dn) {
   }
 }
 
-class activedirectoryHandler {
+class ActiveDirectoryHandler {
   constructor(activedirectoryHandlerConfig) {
     const {
       //
@@ -195,7 +195,7 @@ class activedirectoryHandler {
     }
     assert(this.isSingleValued.member === false);
     this.initialized = true;
-    await this.log.debug({ m: "Initialized activedirectoryHandler", time: new Date() - starttime }, req);
+    await this.log.debug({ m: "Initialized ActiveDirectoryHandler", time: new Date() - starttime }, req);
   }
 
   async *getObjects({ select = [], from = this.domainBaseDN, where = ["true"], scope = "sub", req, waitForInitialization = true } = {}) {
@@ -207,12 +207,12 @@ class activedirectoryHandler {
     );
     assert(validDN(from), "from must be a valid DN");
     assert(_.isString(scope) && _.includes(["base", "one", "sub"], scope), "scope must be one of 'base', 'one' or 'sub'.");
-    assert(!_.includes(select, "controls"), "activedirectoryHandler.getObjects does not support selecting the field 'controls'");
-    assert(!_.includes(select, "dn"), "activedirectoryHandler.getObjects does not support selecting the field 'dn'. Did you perhaps mean 'distinguishedName'?");
+    assert(!_.includes(select, "controls"), "ActiveDirectoryHandler.getObjects does not support selecting the field 'controls'");
+    assert(!_.includes(select, "dn"), "ActiveDirectoryHandler.getObjects does not support selecting the field 'dn'. Did you perhaps mean 'distinguishedName'?");
     const select_includes_distinguishedName = _.includes(select, "distinguishedName");
     const select_includes_member = _.includes(select, "member");
     if (select_includes_member) {
-      assert(select_includes_distinguishedName, "activedirectoryHandler.getObjects does not support selecting the field 'member' without also selecting the field 'distinguishedName'");
+      assert(select_includes_distinguishedName, "ActiveDirectoryHandler.getObjects does not support selecting the field 'member' without also selecting the field 'distinguishedName'");
     }
 
     if (waitForInitialization) {
@@ -397,7 +397,7 @@ class activedirectoryHandler {
               }
               break;
             case "referral":
-              throw utils.err("ldapjs produced a 'referral', which activedirectoryHandler doesn't know how to handle", {
+              throw utils.err("ldapjs produced a 'referral', which ActiveDirectoryHandler doesn't know how to handle", {
                 referral: item.referral,
               });
             case "err":
@@ -444,4 +444,4 @@ class activedirectoryHandler {
   }
 }
 
-module.exports = activedirectoryHandler;
+module.exports = ActiveDirectoryHandler;

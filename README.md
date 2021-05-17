@@ -28,8 +28,8 @@ and the following disadvantages:
 
 Import and configure it like so:
 ```js
-const activedirectoryHandler = require("@fujitsusweden/activedirectory-handler");
-const adHandler = new activedirectoryHandler({
+const ActiveDirectoryHandler = require("@fujitsusweden/activedirectory-handler");
+const adHandler = new ActiveDirectoryHandler({
   url: "ldap://your-domain.example.com",
   user: "username",
   password: "password",
@@ -67,7 +67,7 @@ for await (const user of adHandler.getObjects({
 Details for options to `getObjects`:
 
 * `select` is an array of the attribute names to fetch.
-* `from` is the base DN to search. Defaults to `domainBaseDN` given to `new activedirectoryHandler`.
+* `from` is the base DN to search. Defaults to `domainBaseDN` given to `new ActiveDirectoryHandler`.
 * `where` is a filter expression. See 'LDAP filter DSL' below.
 * `scope` is one of `base`, `one` or `sub`. Defaults to `sub`.
 * `req` for passing to the log functions.
