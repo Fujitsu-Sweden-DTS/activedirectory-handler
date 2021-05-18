@@ -10,6 +10,19 @@
     "type": "git",
     "url": "git+https://github.com/Fujitsu-Sweden-DTS/activedirectory-handler.git"
   },
+  "keywords": [
+    "AD",
+    "active-directory",
+    "activedirectory",
+    "ad",
+    "async",
+    "generator",
+    "generator-function",
+    "generatorfunction",
+    "ldap",
+    "ldapjs",
+    "microsoft"
+  ],
   "author": {
     "name": "Axel Svensson",
     "email": "mail@axelsvensson.com"
