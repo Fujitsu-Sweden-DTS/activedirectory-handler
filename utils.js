@@ -1,9 +1,13 @@
 "use strict";
+const _ = require("lodash");
+const assert = require("assert");
 const utils = module.exports;
 
 // Make it easier to pass meta-data in an error.
 // Use like so: throw utils.err("Error message", {metadata1: value1, otherthing2: value2})
 utils.err = function (message, obj) {
+  assert(_.isString(message), "First parameter to utils.err must be a string.");
+  assert(_.isPlainObject(obj), "Second parameter to utils.err must be a plain object.");
   // Create a new Error object without any message.
   const err = Error("");
   // Add a message.

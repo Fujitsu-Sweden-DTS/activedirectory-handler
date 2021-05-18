@@ -22,18 +22,22 @@ function validDN(dn) {
   }
 }
 
-class activedirectoryHandler {
+class ActiveDirectoryHandler {
   constructor(activedirectoryHandlerConfig) {
     const {
       //
       domainBaseDN,
-      isSingleValued,
       log,
+      overrideSingleValued = {},
       password,
       schemaConfigBaseDN,
       url,
       user,
     } = activedirectoryHandlerConfig;
+    assert(
+      !("isSingleValued" in activedirectoryHandlerConfig),
+      "You included an invalid option `isSingleValued` in the config for ActiveDirectoryHandler. Did you perhaps mean `overrideSingleValued`?",
+    );
 
     // The Base DN for the domain
     assert(validDN(domainBaseDN), "domainBaseDN must be a valid DN");
@@ -47,26 +51,27 @@ class activedirectoryHandler {
     // function below, so that multi-valued attributes are always set to an array.
     // In doing so, this map from attribute name to a bool indicating whether that
     // attribute is single-valued, is consulted. This map is populated by
-    // initialize by reading the AD server's schema. However, the isSingleValued
-    // option passed to the constructor will override the schema, and can be used
-    // for attributes that are multi-valued per schema definition but in practice
-    // are single-valued.
-    assert(_.isPlainObject(isSingleValued), "isSingleValued must be a plain object");
+    // initialize by reading the AD server's schema. However, the
+    // overrideSingleValued option passed to the constructor will override the
+    // schema, and can be used for attributes that are multi-valued per schema
+    // definition but in practice are single-valued.
+    assert(_.isPlainObject(overrideSingleValued), "overrideSingleValued must be a plain object");
     assert(
-      _.every(_.keys(isSingleValued), k => k.match(AttributeNameRE)),
-      `Every key in isSingleValued must match ${AttributeNameRE}.`,
+      _.every(_.keys(overrideSingleValued), k => k.match(AttributeNameRE)),
+      `Every key in overrideSingleValued must match ${AttributeNameRE}.`,
     );
     assert(
-      _.every(_.keys(isSingleValued), k => isSingleValued[k] === Boolean(isSingleValued[k])),
-      "Every value in isSingleValued must be a boolean.",
+      _.every(_.keys(overrideSingleValued), k => overrideSingleValued[k] === Boolean(overrideSingleValued[k])),
+      "Every value in overrideSingleValued must be a boolean.",
     );
-    this.isSingleValued = _.cloneDeep(isSingleValued);
+    this.dictSingleValued = _.cloneDeep(overrideSingleValued);
     for (const attrib of attributesNeededForInitialization) {
-      assert(!(attrib in this.isSingleValued), `You may not use isSingleValued to overload '${attrib}'.`);
-      this.isSingleValued[attrib] = true; // All of them are single-valued.
+      assert(!(attrib in this.dictSingleValued), `You may not include '${attrib}' in overrideSingleValued.`);
+      this.dictSingleValued[attrib] = true; // All of them are single-valued.
     }
 
     // The application logger
+    assert(_.isObject(log), "log missing from ActiveDirectoryHandler config");
     for (const fun of ["debug", "info", "warn", "error", "critical"]) {
       assert(_.isFunction(log[fun]), `log object must have a '${fun}' function.`);
     }
@@ -100,6 +105,9 @@ class activedirectoryHandler {
       badPasswordTime: ldapparsing.dateFormatter_WinNT,
       lastLogonTimestamp: ldapparsing.dateFormatter_WinNT,
     };
+
+    // The set of boolean attributes
+    this.booleanAttributes = new Set();
 
     this.initialized = false;
 
@@ -158,21 +166,29 @@ class activedirectoryHandler {
     })) {
       // Remember what attributes are multi-valued
       let isv = null;
-      if (item.isSingleValued === "TRUE" || item.isSingleValued === true) {
+      if (
+        // Test for both 'TRUE' and true since we're in the middle of initialization.
+        item.isSingleValued === "TRUE" ||
+        item.isSingleValued === true
+      ) {
         isv = true;
       } else if (item.isSingleValued === "FALSE" || item.isSingleValued === false) {
         isv = false;
       } else {
-        throw utils.err({ message: "Could not determine whether ldap attribute is single-valued.", item });
+        throw utils.err("Could not determine whether ldap attribute is single-valued.", { item });
       }
-      if (item.lDAPDisplayName in this.isSingleValued) {
+      if (item.lDAPDisplayName in this.dictSingleValued) {
         if (_.includes(attributesNeededForInitialization, item.lDAPDisplayName)) {
           assert(isv, "Unexpected schema");
         } else {
-          assert(this.isSingleValued[item.lDAPDisplayName] !== isv, "Unnecessary isSingleValued overload or duplicate schema entry");
+          assert(this.dictSingleValued[item.lDAPDisplayName] !== isv, "Unnecessary entry in overrideSingleValued or duplicate schema entry");
         }
       } else {
-        this.isSingleValued[item.lDAPDisplayName] = isv;
+        this.dictSingleValued[item.lDAPDisplayName] = isv;
+      }
+      // Remember what attributes are boolean
+      if (item.attributeSyntax === "2.5.5.8") {
+        this.booleanAttributes.add(item.lDAPDisplayName);
       }
       // Assign formatters
       if (item.lDAPDisplayName in this.extractionFormatters) {
@@ -192,12 +208,15 @@ class activedirectoryHandler {
         await this.log.warn({ message: "Could not determine parsing method for ldap attribute", item }, req);
       }
     }
-    assert(this.isSingleValued.member === false);
+    assert(this.dictSingleValued.member === false);
+    for (const attrib of ["attributeSyntax", "distinguishedName", "lDAPDisplayName", "member", "objectClass"]) {
+      assert(!this.booleanAttributes.has(attrib), `Attribute ${attrib} seems to be boolean. It shouldn't.`);
+    }
     this.initialized = true;
-    await this.log.debug({ m: "Initialized activedirectoryHandler", time: new Date() - starttime }, req);
+    await this.log.debug({ m: "Initialized ActiveDirectoryHandler", time: new Date() - starttime }, req);
   }
 
-  async *getObjects({ select = [], from = this.domainBaseDN, where = ["has", "objectClass"], scope = "sub", req, waitForInitialization = true } = {}) {
+  async *getObjects({ select = [], from = this.domainBaseDN, where = ["true"], scope = "sub", req, waitForInitialization = true } = {}) {
     // Some validation
     assert(_.isArray(select) && 1 <= _.size(select) && _.every(select, _.isString), "select must be a non-empty array of strings");
     assert(
@@ -206,13 +225,10 @@ class activedirectoryHandler {
     );
     assert(validDN(from), "from must be a valid DN");
     assert(_.isString(scope) && _.includes(["base", "one", "sub"], scope), "scope must be one of 'base', 'one' or 'sub'.");
-    assert(!_.includes(select, "controls"), "activedirectoryHandler.getObjects does not support selecting the field 'controls'");
-    assert(!_.includes(select, "dn"), "activedirectoryHandler.getObjects does not support selecting the field 'dn'. Did you perhaps mean 'distinguishedName'?");
+    assert(!_.includes(select, "controls"), "ActiveDirectoryHandler.getObjects does not support selecting the field 'controls'");
+    assert(!_.includes(select, "dn"), "ActiveDirectoryHandler.getObjects does not support selecting the field 'dn'. Did you perhaps mean 'distinguishedName'?");
     const select_includes_distinguishedName = _.includes(select, "distinguishedName");
     const select_includes_member = _.includes(select, "member");
-    if (select_includes_member) {
-      assert(select_includes_distinguishedName, "activedirectoryHandler.getObjects does not support selecting the field 'member' without also selecting the field 'distinguishedName'");
-    }
 
     if (waitForInitialization) {
       // Ensure we are initialized
@@ -222,7 +238,7 @@ class activedirectoryHandler {
       assert(this.initialized);
       // Validate attributes against schema
       for (const attrib of select) {
-        assert(attrib in this.isSingleValued, `Refuse to fetch non-existent attribute '${attrib}'`);
+        assert(attrib in this.dictSingleValued, `Refuse to fetch non-existent attribute '${attrib}'`);
       }
     }
 
@@ -241,9 +257,10 @@ class activedirectoryHandler {
       await bind(this.user, this.password);
 
       // Send query
+      const attributes = _.uniq([...select, "distinguishedName"]);
       const emitter = await search(from, {
-        attributes: select,
-        filter: ldapfilter(where),
+        attributes,
+        filter: ldapfilter(where, this.booleanAttributes),
         scope,
         paged: { pagePause: true },
       });
@@ -307,6 +324,19 @@ class activedirectoryHandler {
           assert(!(type in rawobj), "Unexpectedly, ldapjs returned either an entry for 'dn' or a duplicate entry.");
           rawobj[type] = _vals;
         }
+        if (entry.attributes.length === 0) {
+          // It seems that in some circumstances, LDAP servers can return entries with no attributes.
+          // The circumstances are:
+          // - The search should be such that it would return an OU that contains objects you're not allowed to see.
+          // - No filters that reference the value of any attributes may be used.
+          // - Filters for the existence of an attribute can be OK depending on what attribute it is.
+          // Here, we only detect the situation and throw an error.
+          throw utils.err(
+            "ldapjs parsed an entry with no attributes, when at least one attribute is expected. If you have no need to read this object, it is likely possible to fix this problem by choosing a more restrictive filter. Any filter that somehow restricts the value of an attribute should do; that seems to exclude objects read in this way.",
+            { distinguishedName: entry._dn },
+          );
+        }
+
         const ret = {};
         // Compensate for ldapjs's quirks, among those the failure to distinguish
         // between single- and multi-valued attributes, as documented above.
@@ -315,6 +345,12 @@ class activedirectoryHandler {
             if (attrib === "controls" || attrib === "dn") {
               // controls and dn attributes are known to be returned without
               // having been asked for. We'll ignore those.
+              //
+              continue;
+            }
+            if (attrib === "distinguishedName" && !select_includes_distinguishedName) {
+              // We always ask for distinguishedName for internal reasons.
+              // However, in this case it shouldn't be included in ret.
               continue;
             }
             if (attrib.match(/^member;range=/u)) {
@@ -323,7 +359,7 @@ class activedirectoryHandler {
               // interface for the price of a little more memory use.
               assert(select_includes_member, "Got incomplete member attribute without asking for members.");
               assert(_.isEqual(obj.member, []), "Got both complete and incomplete member attribute.");
-              assert(this.initialized, "Tried to get members before inizialization.");
+              assert(this.initialized, "Tried to get members before initialization.");
               const members = [];
               for await (const member of this.getObjects({
                 select: ["distinguishedName"],
@@ -335,10 +371,10 @@ class activedirectoryHandler {
               ret.member = members;
               continue;
             }
-            throw utils.err({ message: "Got attribute without asking for it.", attrib });
+            throw utils.err("Got attribute without asking for it.", { attrib });
           }
           let value = obj[attrib];
-          if (this.isSingleValued[attrib] === false) {
+          if (this.dictSingleValued[attrib] === false) {
             // Attribute is multi-valued
             if (_.isArray(value)) {
               // Attribute is multi-valued and value is array, as it should be. Do nothing.
@@ -351,7 +387,7 @@ class activedirectoryHandler {
             if (attrib in formats) {
               value = _.map(_.zip(value, rawobj[attrib]), ([val, rawval]) => formats[attrib](val, rawval));
             }
-          } else if (this.isSingleValued[attrib] === true) {
+          } else if (this.dictSingleValued[attrib] === true) {
             // Attribute is single-valued
             if (_.isArray(value)) {
               throw Error(`Attribute '${attrib}' is single-valued, but value is an array.`);
@@ -396,7 +432,7 @@ class activedirectoryHandler {
               }
               break;
             case "referral":
-              throw utils.err("ldapjs produced a 'referral', which activedirectoryHandler doesn't know how to handle", {
+              throw utils.err("ldapjs produced a 'referral', which ActiveDirectoryHandler doesn't know how to handle", {
                 referral: item.referral,
               });
             case "err":
@@ -443,4 +479,4 @@ class activedirectoryHandler {
   }
 }
 
-module.exports = activedirectoryHandler;
+module.exports = ActiveDirectoryHandler;

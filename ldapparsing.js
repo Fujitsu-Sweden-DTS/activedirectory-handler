@@ -2,6 +2,7 @@
 const _ = require("lodash");
 const assert = require("assert");
 const momentHandler = require("./momentHandler.js");
+const utils = require("./utils");
 
 // The 18-digit Active Directory timestamps, also named 'Windows NT time
 // format', 'Win32 FILETIME or SYSTEMTIME' or NTFS file time. These are used in
@@ -57,7 +58,7 @@ exports.ldapBool = function (value) {
   if (value === "FALSE") {
     return false;
   }
-  return value;
+  throw utils.err("This value does not parse to a boolean", { value });
 };
 
 exports.int32 = obj => (typeof obj === "string" ? (obj === "" ? null : Number.parseInt(obj)) : obj);
