@@ -6,8 +6,6 @@ module.exports = {
     es2021: true,
   },
   extends: "@fujitsusweden/standard",
-  parserOptions: {
-    ecmaVersion: 12,
-  },
+  parserOptions: { ecmaVersion: 12 },
   rules: {},
 };

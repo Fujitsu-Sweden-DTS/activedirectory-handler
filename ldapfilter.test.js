@@ -1,5 +1,6 @@
 "use strict";
 /* global describe, test, expect */
+/* eslint no-magic-numbers: "off" */
 const _ = require("lodash");
 const assert = require("assert");
 const ldapfilter = require("./ldapfilter.js");
@@ -7,15 +8,14 @@ const ldapjs = require("ldapjs");
 
 const booleanAttributes = new Set(["boolAttrib1", "boolAttrib2"]);
 function iter(n, fun, arg) {
-  while (n) {
+  for (; 0 < n; n--) {
     arg = fun(arg);
-    n--;
   }
   return arg;
 }
 
 describe("Test that erroneous ldap filter expressions won't be accepted", () => {
-  var test_erroneous_ldap_filters = [
+  const test_erroneous_ldap_filters = [
     ["and"], // Operator 'and' must have at least one arguments
     ["or"], // Operator 'or' must have at least one arguments
     ["equals", "Abc", "def"], // Attributes cannot begin with capital letter
@@ -48,7 +48,7 @@ describe("Test that erroneous ldap filter expressions won't be accepted", () => 
     ["endswith", "boolAttrib1", "FALSE"], // illegal operator for boolean attribute
     ["contains", "boolAttrib2", "TRUE"], // illegal operator for boolean attribute
   ];
-  for (let bad of test_erroneous_ldap_filters) {
+  for (const bad of test_erroneous_ldap_filters) {
     test(JSON.stringify(bad), () => {
       expect(() => ldapfilter(bad, booleanAttributes)).toThrow();
     });
@@ -282,19 +282,19 @@ describe("Test that ldap filter expressions are correctly synthesized", () => {
     // Test that ldapfilter does not cause stack overflow
     {
       //
-      str: "(|" + iter(14, x => `${x}${x}`, "(ab=cd)") + ")",
+      str: `(|${iter(14, x => `${x}${x}`, "(ab=cd)")})`,
       exp: ["oneof", "ab", iter(2 ** 14, x => ["cd", ...x], [])],
       obj: new ldapjs.OrFilter({ filters: iter(2 ** 14, x => [...x, new ldapjs.EqualityFilter({ attribute: "ab", value: "cd" })], []) }),
     },
     {
       //
-      str: "(|" + iter(14, x => `${x}${x}`, "(ab=cd)") + ")",
+      str: `(|${iter(14, x => `${x}${x}`, "(ab=cd)")})`,
       exp: iter(2 ** 14, x => [...x, ["equals", "ab", "cd"]], ["or"]),
       obj: new ldapjs.OrFilter({ filters: iter(2 ** 14, x => [...x, new ldapjs.EqualityFilter({ attribute: "ab", value: "cd" })], []) }),
     },
     {
       //
-      str: "(&" + iter(14, x => `${x}${x}`, "(ab=cd)") + ")",
+      str: `(&${iter(14, x => `${x}${x}`, "(ab=cd)")})`,
       exp: iter(2 ** 14, x => [...x, ["equals", "ab", "cd"]], ["and"]),
       obj: new ldapjs.AndFilter({ filters: iter(2 ** 14, x => [...x, new ldapjs.EqualityFilter({ attribute: "ab", value: "cd" })], []) }),
     },
@@ -310,7 +310,7 @@ describe("Test that ldap filter expressions are correctly synthesized", () => {
     assert("str" in test_case);
     assert("exp" in test_case);
     assert("obj" in test_case);
-    test("" + index, () => {
+    test(`${index}`, () => {
       const { str: expected_filterstring, exp: filterexpression, obj: ldapjs_filterobject } = test_case;
       const filterexpression_clone = _.cloneDeep(filterexpression);
       const actual_filterstring = ldapfilter(filterexpression, booleanAttributes);

@@ -15,9 +15,10 @@ utils.err = function (message, obj) {
   // Adjust the stack to look like the error was created at the point where utils.err was called.
   // Since the original stack string was created with an empty error message, we know that it takes only 1 line.
   // So, by removing the top 2 lines and adding back a line with the error message, we get the effect of removing the stack frame for the call to utils.err.
-  err.stack = [`Error: ${message}`, ...err.stack.split("\n").slice(2)].join("\n");
+  const discard_lines = 2;
+  err.stack = [`Error: ${message}`, ...err.stack.split("\n").slice(discard_lines)].join("\n");
   // Add other parameters to the error
-  for (let key in obj) {
+  for (const key in obj) {
     err[key] = obj[key];
   }
   return err;
