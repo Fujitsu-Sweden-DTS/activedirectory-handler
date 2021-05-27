@@ -12,3 +12,7 @@ First published version
 - Non-breaking API changes:
   - Add filter operators for `true` and `false`.
 - Improve/fix README.md, tests, ldapfilter synthesis, boolean handling, etc.
+
+## v0.3.0
+
+Maintenance only.
