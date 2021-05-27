@@ -4,7 +4,7 @@ const assert = require("assert");
 const ldapfilter = require("./ldapfilter");
 const ldapjs = require("ldapjs");
 const ldapparsing = require("./ldapparsing");
-const utils = require("./utils");
+const futile = require("@fujitsusweden/futile");
 const { promisify } = require("util");
 
 const AttributeNameRE = /^[a-z][A-Za-z0-9-]{1,59}$/u;
@@ -177,7 +177,7 @@ class ActiveDirectoryHandler {
       } else if (item.isSingleValued === "FALSE" || item.isSingleValued === false) {
         isv = false;
       } else {
-        throw utils.err("Could not determine whether ldap attribute is single-valued.", { item });
+        throw futile.err("Could not determine whether ldap attribute is single-valued.", { item });
       }
       if (item.lDAPDisplayName in this.dictSingleValued) {
         if (_.includes(attributesNeededForInitialization, item.lDAPDisplayName)) {
@@ -343,7 +343,7 @@ class ActiveDirectoryHandler {
           // - No filters that reference the value of any attributes may be used.
           // - Filters for the existence of an attribute can be OK depending on what attribute it is.
           // Here, we only detect the situation and throw an error.
-          throw utils.err(
+          throw futile.err(
             "ldapjs parsed an entry with no attributes, when at least one attribute is expected. If you have no need to read this object, it is likely possible to fix this problem by choosing a more restrictive filter. Any filter that somehow restricts the value of an attribute should do; that seems to exclude objects read in this way.",
             { distinguishedName: entry._dn },
           );
@@ -383,7 +383,7 @@ class ActiveDirectoryHandler {
               ret.member = members;
               continue;
             }
-            throw utils.err("Got attribute without asking for it.", { attrib });
+            throw futile.err("Got attribute without asking for it.", { attrib });
           }
           let value = obj[attrib];
           if (this.dictSingleValued[attrib] === false) {
@@ -444,13 +444,13 @@ class ActiveDirectoryHandler {
               }
               break;
             case "referral":
-              throw utils.err("ldapjs produced a 'referral', which ActiveDirectoryHandler doesn't know how to handle", { referral: item.referral });
+              throw futile.err("ldapjs produced a 'referral', which ActiveDirectoryHandler doesn't know how to handle", { referral: item.referral });
             case "err":
               throw item.err;
             case "done": {
               const { status, errorMessage } = item.result;
               if (status !== 0 || errorMessage !== "") {
-                throw utils.err("LDAP error", { status, ldapjsErrorMessage: errorMessage });
+                throw futile.err("LDAP error", { status, ldapjsErrorMessage: errorMessage });
               }
               // JavaScript supports breaking to a label but not consecutive breaks.
               break outer_loop;

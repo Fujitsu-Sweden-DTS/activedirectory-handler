@@ -33,6 +33,7 @@
   },
   "homepage": "https://github.com/Fujitsu-Sweden-DTS/activedirectory-handler#readme",
   "dependencies": {
+    "@fujitsusweden/futile": "0.3.0",
     "ldapjs": "2.2.4",
     "lodash": "4.17.21",
     "moment": "2.29.1"
