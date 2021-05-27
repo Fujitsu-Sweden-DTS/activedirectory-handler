@@ -1,4 +1,5 @@
 "use strict";
+/* eslint no-magic-numbers: ["error", { ignore: [0, 1, 2, 3] }] */
 const _ = require("lodash");
 const assert = require("assert");
 
@@ -124,9 +125,9 @@ function synthvalue(a) {
 function ldapfilter(i, b) {
   assert(Array.isArray(i));
   assert(_.isSet(b));
-  let l = i.length;
+  const l = i.length;
   assert(l > 0);
-  let op = i[0];
+  const op = i[0];
   assert(typeof op === "string");
   switch (op) {
     case "and":
@@ -136,36 +137,36 @@ function ldapfilter(i, b) {
       if (l === 2) {
         return ldapfilter(i[1], b);
       }
-      return "(" + { and: "&", or: "|" }[op] + _.map(_.slice(i, 1), x => ldapfilter(x, b)).join("") + ")";
+      return `(${{ and: "&", or: "|" }[op]}${_.map(_.slice(i, 1), x => ldapfilter(x, b)).join("")})`;
     case "not":
       assert(l === 2);
-      return "(!" + ldapfilter(i[1], b) + ")";
+      return `(!${ldapfilter(i[1], b)})`;
     case "equals":
       assert(l === 3);
       if (b.has(i[1])) {
         assert(i[2] === "TRUE" || i[2] === "FALSE", `'${i[1]} is a boolean attribute and can only be equal to 'TRUE' or 'FALSE'.`);
       }
-      return "(" + synthattribute(i[1]) + "=" + synthvalue(i[2]) + ")";
+      return `(${synthattribute(i[1])}=${synthvalue(i[2])})`;
     case "beginswith":
       assert(l === 3);
       assert(!b.has(i[1]), `'${i[1]} is a boolean attribute and is not allowed in 'beginswith' expressions.`);
-      return "(" + synthattribute(i[1]) + "=" + synthvalue(i[2]) + "*)";
+      return `(${synthattribute(i[1])}=${synthvalue(i[2])}*)`;
     case "endswith":
       assert(l === 3);
       assert(!b.has(i[1]), `'${i[1]} is a boolean attribute and is not allowed in 'endswith' expressions.`);
-      return "(" + synthattribute(i[1]) + "=*" + synthvalue(i[2]) + ")";
+      return `(${synthattribute(i[1])}=*${synthvalue(i[2])})`;
     case "contains":
       assert(l === 3);
       assert(!b.has(i[1]), `'${i[1]} is a boolean attribute and is not allowed in 'contains' expressions.`);
-      return "(" + synthattribute(i[1]) + "=*" + synthvalue(i[2]) + "*)";
+      return `(${synthattribute(i[1])}=*${synthvalue(i[2])}*)`;
     case "has":
       assert(l === 2);
-      return "(" + synthattribute(i[1]) + "=*)";
+      return `(${synthattribute(i[1])}=*)`;
     case "oneof":
       assert(l === 3);
       {
-        let attribute = i[1];
-        let arrValue = i[2];
+        const attribute = i[1];
+        const arrValue = i[2];
         assert(_.isArray(arrValue));
         if (arrValue.length === 0) {
           // We're asked to match at least one of zero possibilities.

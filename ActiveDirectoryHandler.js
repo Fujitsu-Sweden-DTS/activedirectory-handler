@@ -1,15 +1,17 @@
 "use strict";
-/* eslint no-loop-func: "off" */
 const _ = require("lodash");
 const assert = require("assert");
 const ldapfilter = require("./ldapfilter");
 const ldapjs = require("ldapjs");
 const ldapparsing = require("./ldapparsing");
-const utils = require("./utils");
+const futile = require("@fujitsusweden/futile");
 const { promisify } = require("util");
 
 const AttributeNameRE = /^[a-z][A-Za-z0-9-]{1,59}$/u;
 const attributesNeededForInitialization = ["lDAPDisplayName", "attributeSyntax", "isSingleValued"];
+const initialize_throttle_delay = 10000;
+const buffer_pause_at_length = 2000;
+const buffer_resume_at_length = 200;
 function validDN(dn) {
   try {
     ldapjs.parseDN(dn);
@@ -111,7 +113,7 @@ class ActiveDirectoryHandler {
 
     this.initialized = false;
 
-    this.initialize = _.throttle(this.initialize.bind(this), 10000, { leading: true, trailing: false });
+    this.initialize = _.throttle(this.initialize.bind(this), initialize_throttle_delay, { leading: true, trailing: false });
   }
 
   async initialize(req) {
@@ -175,7 +177,7 @@ class ActiveDirectoryHandler {
       } else if (item.isSingleValued === "FALSE" || item.isSingleValued === false) {
         isv = false;
       } else {
-        throw utils.err("Could not determine whether ldap attribute is single-valued.", { item });
+        throw futile.err("Could not determine whether ldap attribute is single-valued.", { item });
       }
       if (item.lDAPDisplayName in this.dictSingleValued) {
         if (_.includes(attributesNeededForInitialization, item.lDAPDisplayName)) {
@@ -216,7 +218,7 @@ class ActiveDirectoryHandler {
     await this.log.debug({ m: "Initialized ActiveDirectoryHandler", time: new Date() - starttime }, req);
   }
 
-  async *getObjects({ select = [], from = this.domainBaseDN, where = ["true"], scope = "sub", req, waitForInitialization = true } = {}) {
+  async* getObjects({ select = [], from = this.domainBaseDN, where = ["true"], scope = "sub", req, waitForInitialization = true } = {}) {
     // Some validation
     assert(_.isArray(select) && 1 <= _.size(select) && _.every(select, _.isString), "select must be a non-empty array of strings");
     assert(
@@ -243,9 +245,7 @@ class ActiveDirectoryHandler {
     }
 
     // Create client
-    const ldapClient = ldapjs.createClient({
-      url: this.url,
-    });
+    const ldapClient = ldapjs.createClient({ url: this.url });
 
     // Promisify
     const bind = promisify(ldapClient.bind).bind(ldapClient);
@@ -275,10 +275,10 @@ class ActiveDirectoryHandler {
         // callback when receiving a 'page' event. Therefore, pausing is
         // implemented in the generator loop below while resuming is implemented
         // here.
-        if (buffer.length > 2000 && !should_pause) {
+        if (buffer.length > buffer_pause_at_length && !should_pause) {
           should_pause = true;
         }
-        if (buffer.length < 200 && should_pause) {
+        if (buffer.length < buffer_resume_at_length && should_pause) {
           should_pause = false;
           if (resume_callback) {
             resume_callback();
@@ -315,6 +315,18 @@ class ActiveDirectoryHandler {
         bufferctl();
       });
 
+      const waitUntilBufferIsNonempty = () =>
+        new Promise((resolve, reject) => {
+          if (buffer.length) {
+            resolve(true);
+          } else if (buffer_callback) {
+            reject(new Error("This should never happen"));
+          } else {
+            buffer_callback = resolve;
+            bufferctl();
+          }
+        });
+
       // Function to process each item
       const formats = _.pick(this.extractionFormatters, select);
       const process = async entry => {
@@ -331,7 +343,7 @@ class ActiveDirectoryHandler {
           // - No filters that reference the value of any attributes may be used.
           // - Filters for the existence of an attribute can be OK depending on what attribute it is.
           // Here, we only detect the situation and throw an error.
-          throw utils.err(
+          throw futile.err(
             "ldapjs parsed an entry with no attributes, when at least one attribute is expected. If you have no need to read this object, it is likely possible to fix this problem by choosing a more restrictive filter. Any filter that somehow restricts the value of an attribute should do; that seems to exclude objects read in this way.",
             { distinguishedName: entry._dn },
           );
@@ -371,7 +383,7 @@ class ActiveDirectoryHandler {
               ret.member = members;
               continue;
             }
-            throw utils.err("Got attribute without asking for it.", { attrib });
+            throw futile.err("Got attribute without asking for it.", { attrib });
           }
           let value = obj[attrib];
           if (this.dictSingleValued[attrib] === false) {
@@ -432,15 +444,13 @@ class ActiveDirectoryHandler {
               }
               break;
             case "referral":
-              throw utils.err("ldapjs produced a 'referral', which ActiveDirectoryHandler doesn't know how to handle", {
-                referral: item.referral,
-              });
+              throw futile.err("ldapjs produced a 'referral', which ActiveDirectoryHandler doesn't know how to handle", { referral: item.referral });
             case "err":
               throw item.err;
             case "done": {
               const { status, errorMessage } = item.result;
               if (status !== 0 || errorMessage !== "") {
-                throw utils.err("LDAP error", { status, ldapjsErrorMessage: errorMessage });
+                throw futile.err("LDAP error", { status, ldapjsErrorMessage: errorMessage });
               }
               // JavaScript supports breaking to a label but not consecutive breaks.
               break outer_loop;
@@ -450,17 +460,7 @@ class ActiveDirectoryHandler {
           }
         }
 
-        // Await non-empty buffer
-        await new Promise((resolve, reject) => {
-          if (buffer.length) {
-            resolve(true);
-          } else if (buffer_callback) {
-            reject(new Error("This should never happen"));
-          } else {
-            buffer_callback = resolve;
-            bufferctl();
-          }
-        });
+        await waitUntilBufferIsNonempty();
       }
     } finally {
       // Disconnect

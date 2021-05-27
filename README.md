@@ -23,6 +23,7 @@ and the following disadvantages:
 * It is strictly for searching. No server functionality, and no client functionality for adding, deleting or modifying data.
 * Less performant at first call. This is due to an initialization routine that reads the entire AD schema.
 * Probably slightly less performant in general due to being implemented as a wrapper.
+* Not generic; only tested with Microsoft domain controllers.
 
 ## How to use it
 
