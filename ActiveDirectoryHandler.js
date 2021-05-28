@@ -36,11 +36,13 @@ class ActiveDirectoryHandler {
       schemaConfigBaseDN,
       url,
       user,
+      ...invalidConfigOptions
     } = activedirectoryHandlerConfig;
     assert(
       !("isSingleValued" in activedirectoryHandlerConfig),
       "You included an invalid option `isSingleValued` in the config for ActiveDirectoryHandler. Did you perhaps mean `overrideSingleValued`?",
     );
+    assert(_.size(invalidConfigOptions) === 0, `Invalid option(s) in the config for ActiveDirectoryHandler: ${_.keys(invalidConfigOptions)}`);
 
     // The Base DN for the domain
     assert(validDN(domainBaseDN), "domainBaseDN must be a valid DN");
@@ -226,7 +228,7 @@ class ActiveDirectoryHandler {
     await this.log.debug({ m: "Initialized ActiveDirectoryHandler", time: new Date() - starttime }, req);
   }
 
-  async* getObjects({ select = [], from = this.domainBaseDN, where = ["true"], clientSideTransitiveSearch = false, scope = "sub", req, waitForInitialization = true } = {}) {
+  async* getObjects({ select = [], from = this.domainBaseDN, where = ["true"], clientSideTransitiveSearch = false, scope = "sub", req, waitForInitialization = true, ...invalidSearchOptions } = {}) {
     // Some validation
     assert(_.isArray(select) && 1 <= _.size(select) && _.every(select, _.isString), "select must be a non-empty array of strings");
     assert(
@@ -237,6 +239,7 @@ class ActiveDirectoryHandler {
     assert(_.isString(scope) && _.includes(["base", "one", "sub"], scope), "scope must be one of 'base', 'one' or 'sub'.");
     assert(!_.includes(select, "controls"), "ActiveDirectoryHandler.getObjects does not support selecting the field 'controls'");
     assert(!_.includes(select, "dn"), "ActiveDirectoryHandler.getObjects does not support selecting the field 'dn'. Did you perhaps mean 'distinguishedName'?");
+    assert(_.size(invalidSearchOptions) === 0, `Invalid search option(s) in ActiveDirectoryHandler.getObjects: ${_.keys(invalidSearchOptions)}`);
     const select_includes_distinguishedName = _.includes(select, "distinguishedName");
     const select_includes_member = _.includes(select, "member");
 
