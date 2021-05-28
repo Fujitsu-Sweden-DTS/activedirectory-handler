@@ -52,7 +52,11 @@ Details for configuration options:
   This optional parameter can be used to override schema information.
   If `exampleAttribute` is declared in the AD schema as multi-valued but no entity has more than one such value and you don't want to deal with an array, you can force treating it as single-valued as in the example above.
 
-Search example:
+### getObjects
+
+Performs a search over LDAP and generates the results as an asynchronous generator.
+
+Example:
 
 ```js
 for await (const user of adHandler.getObjects({
@@ -65,7 +69,7 @@ for await (const user of adHandler.getObjects({
 }
 ```
 
-Details for options to `getObjects`:
+Details for options sent to `getObjects`:
 
 * `select` is an array of the attribute names to fetch.
 * `from` is the base DN to search. Defaults to `domainBaseDN` given to `new ActiveDirectoryHandler`.
@@ -73,10 +77,7 @@ Details for options to `getObjects`:
 * `scope` is one of `base`, `one` or `sub`. Defaults to `sub`.
 * `req` for passing to the log functions.
 
-If you expect exactly one result entry, you can use `getOneObject` instead of `getObjects`.
-
-### LDAP filter DSL
-
+#### LDAP filter DSL
 
 A filter expression in this [DSL/mini-language](https://en.wikipedia.org/wiki/Domain-specific_language) is made up of strings and arrays.
 It has the following grammar:
@@ -116,6 +117,13 @@ The semantics are as follows:
 ```
 
 Note that the expressions `beginswith`, `endswith` and `contains`, cannot be used with DN attributes. See details [here](https://social.technet.microsoft.com/wiki/contents/articles/5392.active-directory-ldap-syntax-filters.aspx)
+
+### getOneObject
+
+Variant of `getObjects`.
+An asynchronous function that returns one entry if exactly one entry was found, and ot.
+
+Options sent to `getOneObject` are exactly the same as for `getObjects`.
 
 ## Development
 

@@ -140,7 +140,7 @@ class ActiveDirectoryHandler {
       "2.5.5.8": ldapparsing.ldapBool,
       // Signed 32-bit integer
       "2.5.5.9": ldapparsing.int32,
-      // OctetString ("2.5.5.10") has special logic in function initialize
+      // OctetString ("2.5.5.10") has special logic below
       // GeneralizedTime
       "2.5.5.11": ldapparsing.dateFormatter_ADGeneralizedTime,
       // DirectoryString
