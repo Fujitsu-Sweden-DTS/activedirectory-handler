@@ -35,6 +35,7 @@ const adHandler = new ActiveDirectoryHandler({
   user: "username",
   password: "password",
   domainBaseDN: "ou=MainOU,dc=your-domain,dc=example,dc=com",
+  clientSideTransitiveSearchBaseDN: "dc=your-domain,dc=example,dc=com",
   schemaConfigBaseDN: "cn=Schema,cn=Configuration,dc=your-domain,dc=example,dc=com",
   log,
   overrideSingleValued: {
@@ -46,6 +47,8 @@ const adHandler = new ActiveDirectoryHandler({
 Details for configuration options:
 
 * `domainBaseDN` will be used as the default value for the `from` option in searches, see below.
+* `clientSideTransitiveSearchBaseDN` will be used as the `from` option in searches performed internally by the `clientSideTransitiveSearch` workaround.
+  It is optional, and defaults to `domainBaseDN`.
 * `log` is an object holding the following log functions: `debug`, `info`, `warn`, `error` and `critical`.
   Each log function should be an async function taking arguments `data` and `req`.
 * `overrideSingleValued`: Attributes will be treated as single- or multi-valued depending on their schema.
@@ -75,6 +78,7 @@ Details for options sent to `getObjects`:
 * `from` is the base DN to search. Defaults to `domainBaseDN` given to `new ActiveDirectoryHandler`.
 * `where` is a filter expression. See 'LDAP filter DSL' below.
 * `scope` is one of `base`, `one` or `sub`. Defaults to `sub`.
+* `clientSideTransitiveSearch` is an optional boolean, `false` by default. If set to `true`, it turns on a workaround for Microsoft-specific performance problems with transitive (a.k.a. in-chain) membership searches. If you use the special attributes `_transitive_member` or `_transitive_memberOf` in a filter expression and experience performance problems, turn this option on and test thoroughly that you get the same results. If results differ, the `clientSideTransitiveSearchBaseDN` configuration option might be too specific.
 * `req` for passing to the log functions.
 
 #### LDAP filter DSL
@@ -95,7 +99,7 @@ It has the following grammar:
      <oneof>      := ["oneof", <attribute>, <arrValue>]
      <true>       := ["true"]
      <false>      := ["false"]
-     <attribute>  := A string matching /^[a-z][A-Za-z0-9-]{1,59}$/ i.e. 1-60 English alphanumeric characters or dashes, the first of which is a lower-case letter. It can also be "_transitive_member" or "_transitive_memberOf" for transitive (recursive) membership searches.
+     <attribute>  := A string matching /^[a-z][A-Za-z0-9-]{1,59}$/ i.e. 1-60 English alphanumeric characters or dashes, the first of which is a lower-case letter. It can also be "_transitive_member" or "_transitive_memberOf" for transitive (a.k.a. in-chain) membership searches.
      <value>      := A string matching /^.{1,255}$/ i.e. with a length in the interval [1, 255]
      <arrValue>   := An array with zero or more items, each of which a <value>
 ```

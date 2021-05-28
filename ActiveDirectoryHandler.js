@@ -28,6 +28,7 @@ class ActiveDirectoryHandler {
   constructor(activedirectoryHandlerConfig) {
     const {
       //
+      clientSideTransitiveSearchBaseDN,
       domainBaseDN,
       log,
       overrideSingleValued = {},
@@ -44,6 +45,13 @@ class ActiveDirectoryHandler {
     // The Base DN for the domain
     assert(validDN(domainBaseDN), "domainBaseDN must be a valid DN");
     this.domainBaseDN = domainBaseDN;
+
+    if (clientSideTransitiveSearchBaseDN) {
+      assert(validDN(clientSideTransitiveSearchBaseDN), "clientSideTransitiveSearchBaseDN must be a valid DN");
+      this.clientSideTransitiveSearchBaseDN = clientSideTransitiveSearchBaseDN;
+    } else {
+      this.clientSideTransitiveSearchBaseDN = domainBaseDN;
+    }
 
     // It seems that ldapjs treats single- and multi-valued attributes the same:
     // - Attributes with no values are not present in the search entries.
@@ -218,7 +226,7 @@ class ActiveDirectoryHandler {
     await this.log.debug({ m: "Initialized ActiveDirectoryHandler", time: new Date() - starttime }, req);
   }
 
-  async* getObjects({ select = [], from = this.domainBaseDN, where = ["true"], scope = "sub", req, waitForInitialization = true } = {}) {
+  async* getObjects({ select = [], from = this.domainBaseDN, where = ["true"], clientSideTransitiveSearch = false, scope = "sub", req, waitForInitialization = true } = {}) {
     // Some validation
     assert(_.isArray(select) && 1 <= _.size(select) && _.every(select, _.isString), "select must be a non-empty array of strings");
     assert(
@@ -260,7 +268,7 @@ class ActiveDirectoryHandler {
       const attributes = _.uniq([...select, "distinguishedName"]);
       const emitter = await search(from, {
         attributes,
-        filter: ldapfilter(where, this.booleanAttributes),
+        filter: ldapfilter(clientSideTransitiveSearch ? await this.rewrite_filter_for_transitive_membership(where) : where, this.booleanAttributes),
         scope,
         paged: { pagePause: true },
       });
@@ -484,6 +492,49 @@ class ActiveDirectoryHandler {
       ret.push(item);
     }
     return ret;
+  }
+
+  // Transitive (a.k.a. in-chain) membership lookup can be performed using the
+  // special attribute names "_transitive_member" and "_transitive_memberOf",
+  // which use the server-side matching rule LDAP_MATCHING_RULE_IN_CHAIN to
+  // perform a transitive search. With the server doing the recursion, the query
+  // should be quite performant, but in practice it is inexcusably slow. So,
+  // below is an ad-hoc, hacky, chatty, and probably bug-ridden implementation
+  // of transitive membership search. Mysteriously, it is faster by 1-2 orders
+  // of magnitude.
+
+  async rewrite_filter_for_transitive_membership_Helper_transitiveGroupLookup(attribute, startingDNs) {
+    let toLookup = startingDNs;
+    let ret = [];
+    while (toLookup.length) {
+      const nextLevelGroups = _.map(await this.getObjectsA({
+        select: ["distinguishedName"],
+        from: this.clientSideTransitiveSearchBaseDN,
+        where: ["and", ["equals", "objectClass", "group"], ["equals", "objectCategory", "group"], ["oneof", attribute, toLookup]],
+      }), "distinguishedName");
+      ret = _.union(ret, toLookup);
+      toLookup = _.difference(nextLevelGroups, ret);
+    }
+    return ret;
+  }
+
+  async rewrite_filter_for_transitive_membership_Helper(filter) {
+    const [op, ...args] = filter;
+    if (_.includes(["and", "or", "not"], op)) {
+      return [op, ...await Promise.all(_.map(args, x => this.rewrite_filter_for_transitive_membership_Helper(x)))];
+    }
+    if (_.includes(["equals", "oneof"], op) && _.includes(["_transitive_member", "_transitive_memberOf"], args[0])) {
+      const [transitive_attrib, value] = args;
+      const attrib = { _transitive_member: "member", _transitive_memberOf: "memberOf" }[transitive_attrib];
+      const arrayValue = op === "oneof" ? value : [value];
+      return ["oneof", attrib, await this.rewrite_filter_for_transitive_membership_Helper_transitiveGroupLookup(attrib, arrayValue)];
+    }
+    return filter;
+  }
+
+  rewrite_filter_for_transitive_membership(filter) {
+    ldapfilter(filter, this.booleanAttributes); // Validate filter expression
+    return this.rewrite_filter_for_transitive_membership_Helper(filter);
   }
 }
 
