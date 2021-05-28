@@ -47,6 +47,7 @@ describe("Test that erroneous ldap filter expressions won't be accepted", () => 
     ["beginswith", "boolAttrib2", "TRUE"], // illegal operator for boolean attribute
     ["endswith", "boolAttrib1", "FALSE"], // illegal operator for boolean attribute
     ["contains", "boolAttrib2", "TRUE"], // illegal operator for boolean attribute
+    ["equals", "_abc", "def"], // underscore is illegal in attribute name
   ];
   for (const bad of test_erroneous_ldap_filters) {
     test(JSON.stringify(bad), () => {
@@ -278,6 +279,22 @@ describe("Test that ldap filter expressions are correctly synthesized", () => {
       str: "(!(objectClass=*))",
       exp: ["false"],
       obj: new ldapjs.NotFilter({ filter: new ldapjs.PresenceFilter({ attribute: "objectClass" }) }),
+    },
+    {
+      //
+      str: "(&(member:1.2.840.113556.1.4.1941:=userDN)(|(memberOf:1.2.840.113556.1.4.1941:=groupDN1)(memberOf:1.2.840.113556.1.4.1941:=groupDN2)))",
+      exp: ["and", ["equals", "_transitive_member", "userDN"], ["oneof", "_transitive_memberOf", ["groupDN1", "groupDN2"]]],
+      obj: new ldapjs.AndFilter({
+        filters: [
+          new ldapjs.EqualityFilter({ attribute: "member:1.2.840.113556.1.4.1941:", value: "userDN" }),
+          new ldapjs.OrFilter({
+            filters: [
+              new ldapjs.EqualityFilter({ attribute: "memberOf:1.2.840.113556.1.4.1941:", value: "groupDN1" }),
+              new ldapjs.EqualityFilter({ attribute: "memberOf:1.2.840.113556.1.4.1941:", value: "groupDN2" }),
+            ],
+          }),
+        ],
+      }),
     },
     // Test that ldapfilter does not cause stack overflow
     {

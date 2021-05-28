@@ -54,6 +54,13 @@ function _escape(inp) {
 // Synthesize <attribute>
 function synthattribute(a) {
   assert(typeof a === "string");
+  // "_transitive_member" and "_transitive_memberOf" are special values for activating LDAP_MATCHING_RULE_TRANSITIVE_EVAL (a.k.a. LDAP_MATCHING_RULE_IN_CHAIN)
+  if (a === "_transitive_member") {
+    return "member:1.2.840.113556.1.4.1941:";
+  }
+  if (a === "_transitive_memberOf") {
+    return "memberOf:1.2.840.113556.1.4.1941:";
+  }
   assert(a.match(/^[a-z][A-Za-z0-9-]{1,59}$/u));
   return a;
 }
