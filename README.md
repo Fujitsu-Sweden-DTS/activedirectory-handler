@@ -118,6 +118,27 @@ The semantics are as follows:
 
 Note that the expressions `beginswith`, `endswith` and `contains`, cannot be used with DN attributes. See details [here](https://social.technet.microsoft.com/wiki/contents/articles/5392.active-directory-ldap-syntax-filters.aspx)
 
+### getObjectsA
+
+Variant of `getObjects`.
+An asynchronous function that returns an array.
+Use only if you expect a fairly low number of results.
+
+Example:
+
+```js
+for (const user of adHandler.getObjectsA({
+  select: ["distinguishedName", "sn"],
+  from: "ou=Users,ou=MainOU,dc=your-domain,dc=example,dc=com",
+  where: ["and", ["equals", "objectCategory", "person"], ["equals", "objectClass", "user"]],
+  req,
+})) {
+  console.log(user)
+}
+```
+
+Details for options sent to `getObjectsA` are exactly the same as for `getObjects`.
+
 ### getOneObject
 
 Variant of `getObjects`.

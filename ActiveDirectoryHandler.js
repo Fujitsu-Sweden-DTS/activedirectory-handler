@@ -477,6 +477,14 @@ class ActiveDirectoryHandler {
     assert(searchresult.length === 1);
     return searchresult[0];
   }
+
+  async getObjectsA(args) {
+    const ret = [];
+    for await (const item of this.getObjects(args)) {
+      ret.push(item);
+    }
+    return ret;
+  }
 }
 
 module.exports = ActiveDirectoryHandler;
