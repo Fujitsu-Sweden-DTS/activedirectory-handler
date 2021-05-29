@@ -29,6 +29,7 @@ class ActiveDirectoryHandler {
     const {
       //
       clientSideTransitiveSearchBaseDN,
+      clientSideTransitiveSearchDefault,
       domainBaseDN,
       log,
       overrideSingleValued = {},
@@ -54,6 +55,8 @@ class ActiveDirectoryHandler {
     } else {
       this.clientSideTransitiveSearchBaseDN = domainBaseDN;
     }
+    assert(_.isUndefined(clientSideTransitiveSearchDefault) || _.isBoolean(clientSideTransitiveSearchDefault), "clientSideTransitiveSearchDefault must be boolean");
+    this.clientSideTransitiveSearchDefault = Boolean(clientSideTransitiveSearchDefault);
 
     // It seems that ldapjs treats single- and multi-valued attributes the same:
     // - Attributes with no values are not present in the search entries.
@@ -228,7 +231,7 @@ class ActiveDirectoryHandler {
     await this.log.debug({ m: "Initialized ActiveDirectoryHandler", time: new Date() - starttime }, req);
   }
 
-  async* getObjects({ select = [], from = this.domainBaseDN, where = ["true"], clientSideTransitiveSearch = false, scope = "sub", req, waitForInitialization = true, ...invalidSearchOptions } = {}) {
+  async* getObjects({ select = [], from = this.domainBaseDN, where = ["true"], clientSideTransitiveSearch = this.clientSideTransitiveSearchDefault, scope = "sub", req, waitForInitialization = true, ...invalidSearchOptions } = {}) {
     // Some validation
     assert(_.isArray(select) && 1 <= _.size(select) && _.every(select, _.isString), "select must be a non-empty array of strings");
     assert(

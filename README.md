@@ -49,6 +49,7 @@ Details for configuration options:
 * `domainBaseDN` will be used as the default value for the `from` option in searches, see below.
 * `clientSideTransitiveSearchBaseDN` will be used as the `from` option in searches performed internally by the `clientSideTransitiveSearch` workaround.
   It is optional, and defaults to `domainBaseDN`.
+* `clientSideTransitiveSearchDefault` will be used as the default for the `clientSideTransitiveSearch` search option. Considered `false` if not given.
 * `log` is an object holding the following log functions: `debug`, `info`, `warn`, `error` and `critical`.
   Each log function should be an async function taking arguments `data` and `req`.
 * `overrideSingleValued`: Attributes will be treated as single- or multi-valued depending on their schema.
@@ -78,7 +79,7 @@ Details for options sent to `getObjects`:
 * `from` is the base DN to search. Defaults to `domainBaseDN` given to `new ActiveDirectoryHandler`.
 * `where` is a filter expression. See 'LDAP filter DSL' below.
 * `scope` is one of `base`, `one` or `sub`. Defaults to `sub`.
-* `clientSideTransitiveSearch` is an optional boolean, `false` by default. If set to `true`, it turns on a workaround for Microsoft-specific performance problems with transitive (a.k.a. in-chain) membership searches. If you use the special attributes `_transitive_member` or `_transitive_memberOf` in a filter expression and experience performance problems, turn this option on and test thoroughly that you get the same results. If results differ, the `clientSideTransitiveSearchBaseDN` configuration option might be too specific.
+* `clientSideTransitiveSearch` is an optional boolean that defaults to the `clientSideTransitiveSearchDefault` config option. If set to `true`, it turns on a workaround for Microsoft-specific performance problems with transitive (a.k.a. in-chain) membership searches. If you use the special attributes `_transitive_member` or `_transitive_memberOf` in a filter expression and experience performance problems, turn this option on and test thoroughly that you get the same results. If results differ, the `clientSideTransitiveSearchBaseDN` configuration option might be too specific.
 * `req` for passing to the log functions.
 
 #### LDAP filter DSL
