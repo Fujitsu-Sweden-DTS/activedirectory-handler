@@ -100,7 +100,7 @@ It has the following grammar:
      <oneof>      := ["oneof", <attribute>, <arrValue>]
      <true>       := ["true"]
      <false>      := ["false"]
-     <attribute>  := A string matching /^[a-z][A-Za-z0-9-]{1,59}$/ i.e. 1-60 English alphanumeric characters or dashes, the first of which is a lower-case letter. It can also be "_transitive_member" or "_transitive_memberOf" for transitive (a.k.a. in-chain) membership searches.
+     <attribute>  := A string matching /^[A-Za-z][A-Za-z0-9-]{0,59}$/ i.e. 1-60 English alphanumeric characters or dashes, the first of which is a letter. It can also be "_transitive_member" or "_transitive_memberOf" for transitive (a.k.a. in-chain) membership searches.
      <value>      := A string matching /^.{1,255}$/ i.e. with a length in the interval [1, 255]
      <arrValue>   := An array with zero or more items, each of which a <value>
 ```

@@ -2,6 +2,7 @@
 /* eslint no-magic-numbers: ["error", { ignore: [0, 1, 2, 3] }] */
 const _ = require("lodash");
 const assert = require("assert");
+const AttributeNameRE = /^[A-Za-z][A-Za-z0-9-]{0,59}$/u;
 
 // The following function is gratefully stolen from lib/helpers.js in the
 // package ldap-filter.
@@ -61,7 +62,7 @@ function synthattribute(a) {
   if (a === "_transitive_memberOf") {
     return "memberOf:1.2.840.113556.1.4.1941:";
   }
-  assert(a.match(/^[a-z][A-Za-z0-9-]{1,59}$/u));
+  assert(a.match(AttributeNameRE));
   return a;
 }
 // Synthesize <value>
@@ -137,3 +138,4 @@ function ldapfilter(i, b) {
 }
 
 module.exports = ldapfilter;
+module.exports.AttributeNameRE = AttributeNameRE;

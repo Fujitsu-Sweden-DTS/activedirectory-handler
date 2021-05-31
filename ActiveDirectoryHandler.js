@@ -7,7 +7,7 @@ const ldapparsing = require("./ldapparsing");
 const futile = require("@fujitsusweden/futile");
 const { promisify } = require("util");
 
-const AttributeNameRE = /^[a-z][A-Za-z0-9-]{1,59}$/u;
+const AttributeNameRE = ldapfilter.AttributeNameRE;
 const attributesNeededForInitialization = ["lDAPDisplayName", "attributeSyntax", "isSingleValued"];
 const initialize_throttle_delay = 10000;
 const buffer_pause_at_length = 2000;

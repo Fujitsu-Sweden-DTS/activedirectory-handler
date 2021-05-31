@@ -18,7 +18,6 @@ describe("Test that erroneous ldap filter expressions won't be accepted", () => 
   const test_erroneous_ldap_filters = [
     ["and"], // Operator 'and' must have at least one arguments
     ["or"], // Operator 'or' must have at least one arguments
-    ["equals", "Abc", "def"], // Attributes cannot begin with capital letter
     ["equals", "", "def"], // Attributes must not be empty
     ["equals", "abc", ""], // Values must not be empty
     ["equals", ["a"], "def"], // Attributes must be strings
@@ -26,7 +25,6 @@ describe("Test that erroneous ldap filter expressions won't be accepted", () => 
     ["equals", "abc", ["a"]], // Values must be strings
     ["equals", "abc", 123], // Values must be strings
     ["equals", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "def"], // Attributes must be no longer than 60 characters
-    ["equals", "a", "aa"], // Attributes must be at least 2 characters
     ["equals", "abcåäö", "aa"], // Attributes must not contain non-English letters
     ["not", ["equals", "aa", "aa"], ["equals", "aa", "aa"]], // Operator 'not' must have exactly one argument
     ["not"], // Operator 'not' must have exactly one argument
@@ -295,6 +293,21 @@ describe("Test that ldap filter expressions are correctly synthesized", () => {
           }),
         ],
       }),
+    },
+    { //
+      str: "(Abc=def)",
+      exp: ["equals", "Abc", "def"],
+      obj: new ldapjs.EqualityFilter({ attribute: "Abc", value: "def" }),
+    },
+    { //
+      str: "(a=aa)",
+      exp: ["equals", "a", "aa"],
+      obj: new ldapjs.EqualityFilter({ attribute: "a", value: "aa" }),
+    },
+    { //
+      str: "(aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa=b)",
+      exp: ["equals", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "b"],
+      obj: new ldapjs.EqualityFilter({ attribute: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", value: "b" }),
     },
     // Test that ldapfilter does not cause stack overflow
     {
