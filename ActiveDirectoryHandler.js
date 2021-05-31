@@ -178,6 +178,7 @@ class ActiveDirectoryHandler {
       from: this.schemaConfigBaseDN,
       where: ["equals", "objectClass", "attributeSchema"],
       waitForInitialization: false,
+      req,
     })) {
       // Remember what attributes are multi-valued
       let isv = null;
@@ -274,7 +275,7 @@ class ActiveDirectoryHandler {
       const attributes = _.uniq([...select, "distinguishedName"]);
       const emitter = await search(from, {
         attributes,
-        filter: ldapfilter(clientSideTransitiveSearch ? await this.rewrite_filter_for_transitive_membership(where) : where, this.booleanAttributes),
+        filter: ldapfilter(clientSideTransitiveSearch ? await this.rewrite_filter_for_transitive_membership(where, req) : where, this.booleanAttributes),
         scope,
         paged: { pagePause: true },
       });
@@ -509,7 +510,7 @@ class ActiveDirectoryHandler {
   // of transitive membership search. Mysteriously, it is faster by 1-2 orders
   // of magnitude.
 
-  async rewrite_filter_for_transitive_membership_Helper_transitiveGroupLookup(attribute, startingDNs) {
+  async rewrite_filter_for_transitive_membership_Helper_transitiveGroupLookup(attribute, startingDNs, req) {
     let toLookup = startingDNs;
     let ret = [];
     while (toLookup.length) {
@@ -517,6 +518,7 @@ class ActiveDirectoryHandler {
         select: ["distinguishedName"],
         from: this.clientSideTransitiveSearchBaseDN,
         where: ["and", ["equals", "objectClass", "group"], ["equals", "objectCategory", "group"], ["oneof", attribute, toLookup]],
+        req,
       }), "distinguishedName");
       ret = _.union(ret, toLookup);
       toLookup = _.difference(nextLevelGroups, ret);
@@ -524,23 +526,23 @@ class ActiveDirectoryHandler {
     return ret;
   }
 
-  async rewrite_filter_for_transitive_membership_Helper(filter) {
+  async rewrite_filter_for_transitive_membership_Helper(filter, req) {
     const [op, ...args] = filter;
     if (_.includes(["and", "or", "not"], op)) {
-      return [op, ...await Promise.all(_.map(args, x => this.rewrite_filter_for_transitive_membership_Helper(x)))];
+      return [op, ...await Promise.all(_.map(args, x => this.rewrite_filter_for_transitive_membership_Helper(x, req)))];
     }
     if (_.includes(["equals", "oneof"], op) && _.includes(["_transitive_member", "_transitive_memberOf"], args[0])) {
       const [transitive_attrib, value] = args;
       const attrib = { _transitive_member: "member", _transitive_memberOf: "memberOf" }[transitive_attrib];
       const arrayValue = op === "oneof" ? value : [value];
-      return ["oneof", attrib, await this.rewrite_filter_for_transitive_membership_Helper_transitiveGroupLookup(attrib, arrayValue)];
+      return ["oneof", attrib, await this.rewrite_filter_for_transitive_membership_Helper_transitiveGroupLookup(attrib, arrayValue, req)];
     }
     return filter;
   }
 
-  rewrite_filter_for_transitive_membership(filter) {
+  rewrite_filter_for_transitive_membership(filter, req) {
     ldapfilter(filter, this.booleanAttributes); // Validate filter expression
-    return this.rewrite_filter_for_transitive_membership_Helper(filter);
+    return this.rewrite_filter_for_transitive_membership_Helper(filter, req);
   }
 }
 
