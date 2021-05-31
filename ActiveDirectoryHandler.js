@@ -359,7 +359,7 @@ class ActiveDirectoryHandler {
           // - Filters for the existence of an attribute can be OK depending on what attribute it is.
           // Here, we only detect the situation and throw an error.
           throw futile.err(
-            "ldapjs parsed an entry with no attributes, when at least one attribute is expected. If you have no need to read this object, it is likely possible to fix this problem by choosing a more restrictive filter. Any filter that somehow restricts the value of an attribute should do; that seems to exclude objects read in this way.",
+            'ldapjs parsed an entry with no attributes, when at least one attribute is expected. If you have no need to read this object, it is likely possible to fix this problem by choosing a more restrictive filter. Any filter that somehow restricts the value of an attribute can help, for example ["has", "objectCategory"]; that seems to exclude objects read in this way.',
             { distinguishedName: entry._dn },
           );
         }
