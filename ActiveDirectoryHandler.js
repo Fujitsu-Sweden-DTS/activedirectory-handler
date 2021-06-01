@@ -232,6 +232,7 @@ class ActiveDirectoryHandler {
     await this.log.debug({ m: "Initialized ActiveDirectoryHandler", time: new Date() - starttime }, req);
   }
 
+  /* eslint-disable-next-line complexity */
   async* getObjects({ select, from = this.domainBaseDN, where = ["true"], clientSideTransitiveSearch = this.clientSideTransitiveSearchDefault, scope = "sub", req, waitForInitialization = true, ...invalidSearchOptions } = {}) {
     const select_all = select === "*";
     // Some validation
