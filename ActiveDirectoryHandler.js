@@ -266,27 +266,122 @@ class ActiveDirectoryHandler {
       }
     }
 
+    // Function to process each item
+    const formats = select_all ? this.extractionFormatters : _.pick(this.extractionFormatters, select);
+    const attribute_ok = select_all ? attribute => attribute in this.dictSingleValued : attribute => _.includes(select, attribute);
+    const process = async entry => {
+      const obj = entry.object,
+        rawobj = { dn: [null] }; // See comment below
+      for (const { type, _vals } of entry.attributes) {
+        assert(!(type in rawobj), "Unexpectedly, ldapjs returned either an entry for 'dn' or a duplicate entry.");
+        rawobj[type] = _vals;
+      }
+      if (entry.attributes.length === 0) {
+        // It seems that in some circumstances, LDAP servers can return entries with no attributes.
+        // The circumstances are:
+        // - The search should be such that it would return an OU that contains objects you're not allowed to see.
+        // - No filters that reference the value of any attributes may be used.
+        // - Filters for the existence of an attribute can be OK depending on what attribute it is.
+        // Here, we only detect the situation and throw an error.
+        throw futile.err(
+          'ldapjs parsed an entry with no attributes, when at least one attribute is expected. If you have no need to read this object, it is likely possible to fix this problem by choosing a more restrictive filter. Any filter that somehow restricts the value of an attribute can help, for example ["has", "objectCategory"]; that seems to exclude objects read in this way.',
+          { distinguishedName: entry._dn },
+        );
+      }
+      const ret = {};
+      // Compensate for ldapjs's quirks, among those the failure to distinguish
+      // between single- and multi-valued attributes, as documented above.
+      for (const attrib in obj) {
+        if (!attribute_ok(attrib)) {
+          if (attrib === "controls" || attrib === "dn") {
+            // controls and dn attributes are known to be returned without
+            // having been asked for. We'll ignore those.
+            //
+            continue;
+          }
+          if (attrib === "distinguishedName" && !select_includes_distinguishedName) {
+            // We always ask for distinguishedName for internal reasons.
+            // However, in this case it shouldn't be included in ret.
+            continue;
+          }
+          if (attrib.match(/^member;range=/u)) {
+            // Attribute 'member' contained more values than the LDAP server was
+            // willing to return. The following workaround provides a consistent
+            // interface for the price of a little more memory use.
+            assert(select_includes_member, "Got incomplete member attribute without asking for members.");
+            assert(_.isEqual(obj.member, []), "Got both complete and incomplete member attribute.");
+            assert(this.initialized, "Tried to get members before initialization.");
+            const members = [];
+            for await (const member of this.getObjects({
+              select: ["distinguishedName"],
+              where: ["equals", "memberOf", obj.distinguishedName],
+              req,
+            })) {
+              members.push(member.distinguishedName);
+            }
+            ret.member = members;
+            continue;
+          }
+          throw futile.err(select_all ? "Got attribute that's not supposed to exist" : "Got attribute without asking for it.", { attrib });
+        }
+        let value = obj[attrib];
+        if (this.dictSingleValued[attrib] === false) {
+          // Attribute is multi-valued
+          if (_.isArray(value)) {
+            // Attribute is multi-valued and value is array, as it should be. Do nothing.
+          } else {
+            // Attribute is multi-valued but the value needs to be enclosed in an array.
+            value = [value];
+          }
+          assert(value.length === rawobj[attrib].length);
+          // Apply format
+          if (attrib in formats) {
+            value = _.map(_.zip(value, rawobj[attrib]), ([val, rawval]) => formats[attrib](val, rawval));
+          }
+        } else if (this.dictSingleValued[attrib] === true) {
+          // Attribute is single-valued
+          if (_.isArray(value)) {
+            throw Error(`Attribute '${attrib}' is single-valued, but value is an array.`);
+          } else {
+            // Attribute is single-valued and value is non-array, as it should be. Do nothing.
+          }
+          assert(rawobj[attrib].length === 1);
+          // Apply format
+          if (attrib in formats) {
+            value = formats[attrib](value, rawobj[attrib][0]);
+          }
+        } else {
+          throw Error(`Missing information about whether attribute '${attrib}' is single-valued.`);
+        }
+        ret[attrib] = value;
+      }
+      return ret;
+    };
+
+    const attributes = select_all ? "*" : _.uniq([...select, "distinguishedName"]);
+    const filterExpression = clientSideTransitiveSearch ? await this.rewrite_filter_for_transitive_membership(where, req) : where;
+    for await (const entry of this.rawSearch({ attributes, filterExpression, from, scope })) {
+      yield await process(entry);
+    }
+  }
+
+  async* rawSearch({ attributes, filterExpression, from, scope }) {
     // Create client
     const ldapClient = ldapjs.createClient({ url: this.url });
-
     // Promisify
     const bind = promisify(ldapClient.bind).bind(ldapClient);
     const search = promisify(ldapClient.search).bind(ldapClient);
     const unbind = promisify(ldapClient.unbind).bind(ldapClient);
-
     try {
       // Connect and authenticate
       await bind(this.user, this.password);
-
       // Send query
-      const attributes = select_all ? "*" : _.uniq([...select, "distinguishedName"]);
       const emitter = await search(from, {
         attributes,
-        filter: ldapfilter(clientSideTransitiveSearch ? await this.rewrite_filter_for_transitive_membership(where, req) : where, this.booleanAttributes),
+        filter: ldapfilter(filterExpression, this.booleanAttributes),
         scope,
         paged: { pagePause: true },
       });
-
       // Buffer control
       const buffer = [];
       let should_pause = false;
@@ -312,7 +407,6 @@ class ActiveDirectoryHandler {
           buffer_callback = null;
         }
       };
-
       emitter.on("searchEntry", entry => {
         buffer.push({ op: "entry", entry });
         bufferctl();
@@ -336,7 +430,6 @@ class ActiveDirectoryHandler {
         buffer.push({ op: "done", result });
         bufferctl();
       });
-
       const waitUntilBufferIsNonempty = () =>
         new Promise((resolve, reject) => {
           if (buffer.length) {
@@ -348,100 +441,6 @@ class ActiveDirectoryHandler {
             bufferctl();
           }
         });
-
-      // Function to process each item
-      const formats = select_all ? this.extractionFormatters : _.pick(this.extractionFormatters, select);
-      const attribute_ok = select_all ? attribute => attribute in this.dictSingleValued : attribute => _.includes(select, attribute);
-      const process = async entry => {
-        const obj = entry.object,
-          rawobj = { dn: [null] }; // See comment below
-        for (const { type, _vals } of entry.attributes) {
-          assert(!(type in rawobj), "Unexpectedly, ldapjs returned either an entry for 'dn' or a duplicate entry.");
-          rawobj[type] = _vals;
-        }
-        if (entry.attributes.length === 0) {
-          // It seems that in some circumstances, LDAP servers can return entries with no attributes.
-          // The circumstances are:
-          // - The search should be such that it would return an OU that contains objects you're not allowed to see.
-          // - No filters that reference the value of any attributes may be used.
-          // - Filters for the existence of an attribute can be OK depending on what attribute it is.
-          // Here, we only detect the situation and throw an error.
-          throw futile.err(
-            'ldapjs parsed an entry with no attributes, when at least one attribute is expected. If you have no need to read this object, it is likely possible to fix this problem by choosing a more restrictive filter. Any filter that somehow restricts the value of an attribute can help, for example ["has", "objectCategory"]; that seems to exclude objects read in this way.',
-            { distinguishedName: entry._dn },
-          );
-        }
-
-        const ret = {};
-        // Compensate for ldapjs's quirks, among those the failure to distinguish
-        // between single- and multi-valued attributes, as documented above.
-        for (const attrib in obj) {
-          if (!attribute_ok(attrib)) {
-            if (attrib === "controls" || attrib === "dn") {
-              // controls and dn attributes are known to be returned without
-              // having been asked for. We'll ignore those.
-              //
-              continue;
-            }
-            if (attrib === "distinguishedName" && !select_includes_distinguishedName) {
-              // We always ask for distinguishedName for internal reasons.
-              // However, in this case it shouldn't be included in ret.
-              continue;
-            }
-            if (attrib.match(/^member;range=/u)) {
-              // Attribute 'member' contained more values than the LDAP server was
-              // willing to return. The following workaround provides a consistent
-              // interface for the price of a little more memory use.
-              assert(select_includes_member, "Got incomplete member attribute without asking for members.");
-              assert(_.isEqual(obj.member, []), "Got both complete and incomplete member attribute.");
-              assert(this.initialized, "Tried to get members before initialization.");
-              const members = [];
-              for await (const member of this.getObjects({
-                select: ["distinguishedName"],
-                where: ["equals", "memberOf", obj.distinguishedName],
-                req,
-              })) {
-                members.push(member.distinguishedName);
-              }
-              ret.member = members;
-              continue;
-            }
-            throw futile.err(select_all ? "Got attribute that's not supposed to exist" : "Got attribute without asking for it.", { attrib });
-          }
-          let value = obj[attrib];
-          if (this.dictSingleValued[attrib] === false) {
-            // Attribute is multi-valued
-            if (_.isArray(value)) {
-              // Attribute is multi-valued and value is array, as it should be. Do nothing.
-            } else {
-              // Attribute is multi-valued but the value needs to be enclosed in an array.
-              value = [value];
-            }
-            assert(value.length === rawobj[attrib].length);
-            // Apply format
-            if (attrib in formats) {
-              value = _.map(_.zip(value, rawobj[attrib]), ([val, rawval]) => formats[attrib](val, rawval));
-            }
-          } else if (this.dictSingleValued[attrib] === true) {
-            // Attribute is single-valued
-            if (_.isArray(value)) {
-              throw Error(`Attribute '${attrib}' is single-valued, but value is an array.`);
-            } else {
-              // Attribute is single-valued and value is non-array, as it should be. Do nothing.
-            }
-            assert(rawobj[attrib].length === 1);
-            // Apply format
-            if (attrib in formats) {
-              value = formats[attrib](value, rawobj[attrib][0]);
-            }
-          } else {
-            throw Error(`Missing information about whether attribute '${attrib}' is single-valued.`);
-          }
-          ret[attrib] = value;
-        }
-        return ret;
-      };
-
       // Generator
       outer_loop: while (true) {
         // Process for as long as something's available
@@ -450,7 +449,7 @@ class ActiveDirectoryHandler {
           const item = buffer.shift();
           switch (item.op) {
             case "entry":
-              yield await process(item.entry);
+              yield item.entry;
               break;
             case "page":
               // Encode assumption about how ldapjs works
@@ -482,7 +481,6 @@ class ActiveDirectoryHandler {
               throw Error("This should never happen");
           }
         }
-
         await waitUntilBufferIsNonempty();
       }
     } finally {
