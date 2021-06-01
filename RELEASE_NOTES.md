@@ -16,3 +16,13 @@ First published version
 ## v0.3.0
 
 Maintenance only.
+
+## v0.4.0
+
+- **BREAKING CHANGE**: Refuse invalid options in config and search.
+- Add functionality to select all attributes.
+- Add special attributes `_transitive_member` and `_transitive_memberOf`.
+- Add search option `clientSideTransitiveSearch`.
+- Add config options `clientSideTransitiveSearchBaseDN` and `clientSideTransitiveSearchDefault`.
+- Add `getObjectsA` function.
+- Various improvements/fixes
