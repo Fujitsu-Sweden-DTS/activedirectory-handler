@@ -248,9 +248,7 @@ class ActiveDirectoryHandler {
     assert(validDN(from), "from must be a valid DN");
     assert(_.isString(scope) && _.includes(["base", "one", "sub"], scope), "scope must be one of 'base', 'one' or 'sub'.");
     assert(_.size(invalidSearchOptions) === 0, `Invalid search option(s) in ActiveDirectoryHandler.getObjects: ${_.keys(invalidSearchOptions)}`);
-    const select_includes = attrib => select_all || _.includes(select, attrib);
-    const select_includes_distinguishedName = select_includes(select, "distinguishedName");
-    const select_includes_member = select_includes(select, "member");
+    const select_includes = select_all ? attribute => attribute in this.dictSingleValued : attribute => _.includes(select, attribute);
 
     if (waitForInitialization) {
       // Ensure we are initialized
@@ -268,7 +266,6 @@ class ActiveDirectoryHandler {
 
     // Function to process each item
     const formats = select_all ? this.extractionFormatters : _.pick(this.extractionFormatters, select);
-    const attribute_ok = select_all ? attribute => attribute in this.dictSingleValued : attribute => _.includes(select, attribute);
     const process = async entry => {
       const obj = entry.object,
         rawobj = { dn: [null] }; // See comment below
@@ -291,40 +288,41 @@ class ActiveDirectoryHandler {
       const ret = {};
       // Compensate for ldapjs's quirks, among those the failure to distinguish
       // between single- and multi-valued attributes, as documented above.
-      for (const attrib in obj) {
-        if (!attribute_ok(attrib)) {
+      for (let attrib in obj) {
+        let value = obj[attrib];
+        let rawvalue = rawobj[attrib];
+        if (attrib.match(/;range=/u)) {
+          // This attribute contained more values than the LDAP server was
+          // willing to return. The following workaround provides a consistent
+          // interface for the price of a little more memory use.
+          const attribMatch = attrib.match(/^([^;]+);range=([0-9]+)-([0-9*]+)$/u);
+          assert(attribMatch, `Strange ranged attribute: ${attrib}`);
+          const [ignored__match, actualAttributeName, rangeFrom, rangeTo] = attribMatch;
+          assert(select_includes(actualAttributeName), select_all ? "Got incomplete value list for non-existent attribute" : "Got incomplete value list for an attribute not asked for.");
+          assert(rangeFrom === "0", "Unexpected offset");
+          assert(rangeTo !== "*", "Unexpected range syntax");
+          assert(_.isEqual(obj[actualAttributeName], []), "Got both complete and incomplete attribute.");
+          assert(this.initialized, "Cannot get large ranges during initialization.");
+          const data = await this.completeValueRange({ distinguishedName: obj.distinguishedName, attribute: actualAttributeName });
+          /* eslint-disable-next-line require-atomic-updates */
+          attrib = actualAttributeName;
+          value = data.values;
+          rawvalue = data.rawValues;
+        }
+        if (!select_includes(attrib)) {
           if (attrib === "controls" || attrib === "dn") {
             // controls and dn attributes are known to be returned without
             // having been asked for. We'll ignore those.
             //
             continue;
           }
-          if (attrib === "distinguishedName" && !select_includes_distinguishedName) {
+          if (attrib === "distinguishedName") {
             // We always ask for distinguishedName for internal reasons.
             // However, in this case it shouldn't be included in ret.
             continue;
           }
-          if (attrib.match(/^member;range=/u)) {
-            // Attribute 'member' contained more values than the LDAP server was
-            // willing to return. The following workaround provides a consistent
-            // interface for the price of a little more memory use.
-            assert(select_includes_member, "Got incomplete member attribute without asking for members.");
-            assert(_.isEqual(obj.member, []), "Got both complete and incomplete member attribute.");
-            assert(this.initialized, "Tried to get members before initialization.");
-            const members = [];
-            for await (const member of this.getObjects({
-              select: ["distinguishedName"],
-              where: ["equals", "memberOf", obj.distinguishedName],
-              req,
-            })) {
-              members.push(member.distinguishedName);
-            }
-            ret.member = members;
-            continue;
-          }
           throw futile.err(select_all ? "Got attribute that's not supposed to exist" : "Got attribute without asking for it.", { attrib });
         }
-        let value = obj[attrib];
         if (this.dictSingleValued[attrib] === false) {
           // Attribute is multi-valued
           if (_.isArray(value)) {
@@ -333,10 +331,10 @@ class ActiveDirectoryHandler {
             // Attribute is multi-valued but the value needs to be enclosed in an array.
             value = [value];
           }
-          assert(value.length === rawobj[attrib].length);
+          assert(value.length === rawvalue.length);
           // Apply format
           if (attrib in formats) {
-            value = _.map(_.zip(value, rawobj[attrib]), ([val, rawval]) => formats[attrib](val, rawval));
+            value = _.map(_.zip(value, rawvalue), ([val, rawval]) => formats[attrib](val, rawval));
           }
         } else if (this.dictSingleValued[attrib] === true) {
           // Attribute is single-valued
@@ -345,10 +343,10 @@ class ActiveDirectoryHandler {
           } else {
             // Attribute is single-valued and value is non-array, as it should be. Do nothing.
           }
-          assert(rawobj[attrib].length === 1);
+          assert(rawvalue.length === 1);
           // Apply format
           if (attrib in formats) {
-            value = formats[attrib](value, rawobj[attrib][0]);
+            value = formats[attrib](value, rawvalue[0]);
           }
         } else {
           throw Error(`Missing information about whether attribute '${attrib}' is single-valued.`);
@@ -505,6 +503,60 @@ class ActiveDirectoryHandler {
       ret.push(item);
     }
     return ret;
+  }
+
+  // Helper function to get all values of one attribute of one object, used in cases where the server isn't willing to send them all in one go.
+  async completeValueRange({ distinguishedName, attribute, initValues = [], initRawValues = [] }) {
+    assert(_.isArray(initValues) && _.isArray(initRawValues) && (initValues.length === initRawValues.length), "Illegal init values");
+    const OVERLAP = 10;
+    const offset = Math.max(0, initValues.length - OVERLAP);
+    assert(_.isInteger(offset) && 0 <= offset, "Bad offset");
+    const entries = [];
+    for await (const entry of this.rawSearch({ attributes: ["distinguishedName", `${attribute};range=${offset}-*`], filterExpression: ["equals", "distinguishedName", distinguishedName], from: distinguishedName, scope: "sub" })) {
+      entries.push(entry);
+    }
+    assert(entries.length === 1, "Didn't get exactly one result in getFullRangeOfValues");
+    const [entry] = entries;
+    let checkedDN = false;
+    let gotData = false;
+    let data = null;
+    for (const { type, _vals } of entry.attributes) {
+      if (type === "distinguishedName") {
+        assert(!checkedDN, "Duplicate distinguishedName attribute");
+        assert(entry.object.distinguishedName === distinguishedName, "Got result for wrong distinguishedName");
+        checkedDN = true;
+      } else {
+        assert(!gotData, "Superfluous attribute");
+        const attribMatch = type.match(/^([^;]+);range=([0-9]+)-([0-9*]+)$/u);
+        assert(attribMatch, "Unexpected attribute");
+        const [ignored__match, actualAttributeName, rangeFrom, rangeTo] = attribMatch;
+        assert(actualAttributeName === attribute, "Unexpected ranged attribute");
+        assert(`${offset}` === rangeFrom, "Got unwanted range");
+        gotData = true;
+        data = { vals: entry.object[type], rawvals: _vals, rangeTo };
+      }
+    }
+    assert(checkedDN, "Didn't get distinguishedName in result");
+    assert(gotData, "Didn't get data in result");
+    assert(_.isArray(data.vals) && _.isArray(data.rawvals) && (data.vals.length === data.rawvals.length), "Got weird data");
+    assert(OVERLAP < data.vals.length, "Overlap not covered");
+    // For some (probably unfathomably profound) reason, Microsoft LDAP server
+    // (or at least ldapjs) seems to consistently return ranged query results in
+    // reverse order with repect to whatever order the range refers to.
+    const newValues = _.reverse([...data.vals]);
+    const newRawValues = _.reverse([...data.rawvals]);
+    for (let i = offset; i < initValues.length; i++) {
+      assert(_.isEqual(initValues[i], newValues[i - offset]), "Overlap mismatch in values");
+      assert(_.isEqual(initRawValues[i], newRawValues[i - offset]), "Overlap mismatch in raw values");
+    }
+    const concatenatedValues = [...initValues.slice(0, offset), ...newValues];
+    const concatenatedRawValues = [...initRawValues.slice(0, offset), ...newRawValues];
+    if (data.rangeTo === "*") {
+      return { values: newValues, rawValues: newRawValues };
+    } else {
+      assert(data.rangeTo === `${offset + newValues.length - 1}`, "Inconsistent end of range");
+      return this.completeValueRange({ distinguishedName, attribute, initValues: concatenatedValues, initRawValues: concatenatedRawValues });
+    }
   }
 
   // Transitive (a.k.a. in-chain) membership lookup can be performed using the

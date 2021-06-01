@@ -16,7 +16,7 @@ Compared to ldapjs, this package have the following advantages:
   Values come in an array if and only if the attribute is multi-valued.
 * Correctly parses several data types that ldapjs doesn't:
   Sid, GUID, Bool, Int32, Windows NT time format, GeneralizedTime and OctetString.
-* Workaround for a server refusing to return all entries in the `member` attribute.
+* Transparent fetching of all values in an attribute when the server limits the number of values per query.
 
 and the following disadvantages:
 
