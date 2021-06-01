@@ -232,20 +232,24 @@ class ActiveDirectoryHandler {
     await this.log.debug({ m: "Initialized ActiveDirectoryHandler", time: new Date() - starttime }, req);
   }
 
-  async* getObjects({ select = [], from = this.domainBaseDN, where = ["true"], clientSideTransitiveSearch = this.clientSideTransitiveSearchDefault, scope = "sub", req, waitForInitialization = true, ...invalidSearchOptions } = {}) {
+  async* getObjects({ select, from = this.domainBaseDN, where = ["true"], clientSideTransitiveSearch = this.clientSideTransitiveSearchDefault, scope = "sub", req, waitForInitialization = true, ...invalidSearchOptions } = {}) {
+    const select_all = select === "*";
     // Some validation
-    assert(_.isArray(select) && 1 <= _.size(select) && _.every(select, _.isString), "select must be a non-empty array of strings");
-    assert(
-      _.every(select, x => x.match(AttributeNameRE)),
-      `Illegal attribute name in select option. All attribute names must match ${AttributeNameRE}.`,
-    );
+    if (!select_all) {
+      assert(_.isArray(select) && 1 <= _.size(select) && _.every(select, _.isString), "select must be '*' or a non-empty array of strings");
+      assert(
+        _.every(select, x => x.match(AttributeNameRE)),
+        `Illegal attribute name in select option. All attribute names must match ${AttributeNameRE}.`,
+      );
+      assert(!_.includes(select, "controls"), "ActiveDirectoryHandler.getObjects does not support selecting the field 'controls'");
+      assert(!_.includes(select, "dn"), "ActiveDirectoryHandler.getObjects does not support selecting the field 'dn'. Did you perhaps mean 'distinguishedName'?");
+    }
     assert(validDN(from), "from must be a valid DN");
     assert(_.isString(scope) && _.includes(["base", "one", "sub"], scope), "scope must be one of 'base', 'one' or 'sub'.");
-    assert(!_.includes(select, "controls"), "ActiveDirectoryHandler.getObjects does not support selecting the field 'controls'");
-    assert(!_.includes(select, "dn"), "ActiveDirectoryHandler.getObjects does not support selecting the field 'dn'. Did you perhaps mean 'distinguishedName'?");
     assert(_.size(invalidSearchOptions) === 0, `Invalid search option(s) in ActiveDirectoryHandler.getObjects: ${_.keys(invalidSearchOptions)}`);
-    const select_includes_distinguishedName = _.includes(select, "distinguishedName");
-    const select_includes_member = _.includes(select, "member");
+    const select_includes = attrib => select_all || _.includes(select, attrib);
+    const select_includes_distinguishedName = select_includes(select, "distinguishedName");
+    const select_includes_member = select_includes(select, "member");
 
     if (waitForInitialization) {
       // Ensure we are initialized
@@ -254,8 +258,10 @@ class ActiveDirectoryHandler {
       }
       assert(this.initialized);
       // Validate attributes against schema
-      for (const attrib of select) {
-        assert(attrib in this.dictSingleValued, `Refuse to fetch non-existent attribute '${attrib}'`);
+      if (!select_all) {
+        for (const attrib of select) {
+          assert(attrib in this.dictSingleValued, `Refuse to fetch non-existent attribute '${attrib}'`);
+        }
       }
     }
 
@@ -272,7 +278,7 @@ class ActiveDirectoryHandler {
       await bind(this.user, this.password);
 
       // Send query
-      const attributes = _.uniq([...select, "distinguishedName"]);
+      const attributes = select_all ? "*" : _.uniq([...select, "distinguishedName"]);
       const emitter = await search(from, {
         attributes,
         filter: ldapfilter(clientSideTransitiveSearch ? await this.rewrite_filter_for_transitive_membership(where, req) : where, this.booleanAttributes),
@@ -343,7 +349,8 @@ class ActiveDirectoryHandler {
         });
 
       // Function to process each item
-      const formats = _.pick(this.extractionFormatters, select);
+      const formats = select_all ? this.extractionFormatters : _.pick(this.extractionFormatters, select);
+      const attribute_ok = select_all ? attribute => attribute in this.dictSingleValued : attribute => _.includes(select, attribute);
       const process = async entry => {
         const obj = entry.object,
           rawobj = { dn: [null] }; // See comment below
@@ -368,7 +375,7 @@ class ActiveDirectoryHandler {
         // Compensate for ldapjs's quirks, among those the failure to distinguish
         // between single- and multi-valued attributes, as documented above.
         for (const attrib in obj) {
-          if (!_.includes(select, attrib)) {
+          if (!attribute_ok(attrib)) {
             if (attrib === "controls" || attrib === "dn") {
               // controls and dn attributes are known to be returned without
               // having been asked for. We'll ignore those.
@@ -398,7 +405,7 @@ class ActiveDirectoryHandler {
               ret.member = members;
               continue;
             }
-            throw futile.err("Got attribute without asking for it.", { attrib });
+            throw futile.err(select_all ? "Got attribute that's not supposed to exist" : "Got attribute without asking for it.", { attrib });
           }
           let value = obj[attrib];
           if (this.dictSingleValued[attrib] === false) {

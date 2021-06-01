@@ -103,8 +103,8 @@ for await (const user of adHandler.getObjects({
 Details for options sent to `getObjects`:
 
 * `select`:
-  Required array.
-  A list of the names of the attributes to fetch.
+  Required, either non-empty array of strings or `"*"`.
+  A list of the names of the attributes to fetch, or `"*"` for fetching all attributes.
 * `from`:
   Optional string, defaults to the value of the `domainBaseDN` config option.
   The base DN to search.
