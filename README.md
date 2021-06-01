@@ -221,6 +221,29 @@ An asynchronous function that returns one entry if exactly one entry was found, 
 
 Options sent to `getOneObject` are exactly the same as for `getObjects`.
 
+### runIntegrationTests
+
+Run integration tests.
+These include testing that your configuration works, that `ActiveDirectoryHandler` works with your AD server, and that your AD server fulfills the assumptions made in `ActiveDirectoryHandler`.
+These tests will download a lot of data and can take hours or even days to complete for large domains.
+The `info`, `warning` and `error` log functions will be used to detail possible problems and, if you're lucky, some suggestions.
+
+```js
+await adHandler.runIntegrationTests({ fraction, req });
+```
+
+Details for options sent to `runIntegrationTests`:
+
+* `fraction`:
+  Optional number, defaults to `1`.
+  Designates what fraction of the tests to run.
+  To run only general tests not pertaining to any individual object, use `0`.
+  To also test a random fraction of individual objects, use a number between `0` and `1`.
+  To run all tests, use `1`.
+* `req`:
+  The req object for passing to the log functions.
+  Optional, unless the log functions require it.
+
 ## Development
 
 Run `./script` without arguments for help

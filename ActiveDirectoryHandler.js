@@ -6,6 +6,7 @@ const ldapjs = require("ldapjs");
 const ldapparsing = require("./ldapparsing");
 const futile = require("@fujitsusweden/futile");
 const { promisify } = require("util");
+const integrationTests = require("./integrationTests.js");
 
 const AttributeNameRE = ldapfilter.AttributeNameRE;
 const attributesNeededForInitialization = ["lDAPDisplayName", "attributeSyntax", "isSingleValued"];
@@ -618,6 +619,12 @@ class ActiveDirectoryHandler {
     assert(connection, "rewrite_filter_for_transitive_membership called without connection");
     ldapfilter(filter, this.booleanAttributes); // Validate filter expression
     return this.rewrite_filter_for_transitive_membership_Helper(filter, connection, req);
+  }
+
+  // Integration tests are in a separate file
+
+  async runIntegrationTests({ fraction, req }) {
+    await integrationTests.runIntegrationTests({ adHandler: this, fraction, req });
   }
 }
 
