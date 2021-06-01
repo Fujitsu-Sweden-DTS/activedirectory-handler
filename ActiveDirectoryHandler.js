@@ -7,7 +7,7 @@ const ldapparsing = require("./ldapparsing");
 const futile = require("@fujitsusweden/futile");
 const { promisify } = require("util");
 
-const AttributeNameRE = /^[a-z][A-Za-z0-9-]{1,59}$/u;
+const AttributeNameRE = ldapfilter.AttributeNameRE;
 const attributesNeededForInitialization = ["lDAPDisplayName", "attributeSyntax", "isSingleValued"];
 const initialize_throttle_delay = 10000;
 const buffer_pause_at_length = 2000;
@@ -28,6 +28,8 @@ class ActiveDirectoryHandler {
   constructor(activedirectoryHandlerConfig) {
     const {
       //
+      clientSideTransitiveSearchBaseDN,
+      clientSideTransitiveSearchDefault,
       domainBaseDN,
       log,
       overrideSingleValued = {},
@@ -35,15 +37,26 @@ class ActiveDirectoryHandler {
       schemaConfigBaseDN,
       url,
       user,
+      ...invalidConfigOptions
     } = activedirectoryHandlerConfig;
     assert(
       !("isSingleValued" in activedirectoryHandlerConfig),
       "You included an invalid option `isSingleValued` in the config for ActiveDirectoryHandler. Did you perhaps mean `overrideSingleValued`?",
     );
+    assert(_.size(invalidConfigOptions) === 0, `Invalid option(s) in the config for ActiveDirectoryHandler: ${_.keys(invalidConfigOptions)}`);
 
     // The Base DN for the domain
     assert(validDN(domainBaseDN), "domainBaseDN must be a valid DN");
     this.domainBaseDN = domainBaseDN;
+
+    if (clientSideTransitiveSearchBaseDN) {
+      assert(validDN(clientSideTransitiveSearchBaseDN), "clientSideTransitiveSearchBaseDN must be a valid DN");
+      this.clientSideTransitiveSearchBaseDN = clientSideTransitiveSearchBaseDN;
+    } else {
+      this.clientSideTransitiveSearchBaseDN = domainBaseDN;
+    }
+    assert(_.isUndefined(clientSideTransitiveSearchDefault) || _.isBoolean(clientSideTransitiveSearchDefault), "clientSideTransitiveSearchDefault must be boolean");
+    this.clientSideTransitiveSearchDefault = Boolean(clientSideTransitiveSearchDefault);
 
     // It seems that ldapjs treats single- and multi-valued attributes the same:
     // - Attributes with no values are not present in the search entries.
@@ -140,7 +153,7 @@ class ActiveDirectoryHandler {
       "2.5.5.8": ldapparsing.ldapBool,
       // Signed 32-bit integer
       "2.5.5.9": ldapparsing.int32,
-      // OctetString ("2.5.5.10") has special logic in function initialize
+      // OctetString ("2.5.5.10") has special logic below
       // GeneralizedTime
       "2.5.5.11": ldapparsing.dateFormatter_ADGeneralizedTime,
       // DirectoryString
@@ -165,6 +178,7 @@ class ActiveDirectoryHandler {
       from: this.schemaConfigBaseDN,
       where: ["equals", "objectClass", "attributeSchema"],
       waitForInitialization: false,
+      req,
     })) {
       // Remember what attributes are multi-valued
       let isv = null;
@@ -218,19 +232,25 @@ class ActiveDirectoryHandler {
     await this.log.debug({ m: "Initialized ActiveDirectoryHandler", time: new Date() - starttime }, req);
   }
 
-  async* getObjects({ select = [], from = this.domainBaseDN, where = ["true"], scope = "sub", req, waitForInitialization = true } = {}) {
+  /* eslint-disable-next-line complexity */
+  async* getObjects({ select, from = this.domainBaseDN, where = ["true"], clientSideTransitiveSearch = this.clientSideTransitiveSearchDefault, scope = "sub", req, waitForInitialization = true, ...invalidSearchOptions } = {}) {
+    const select_all = select === "*";
     // Some validation
-    assert(_.isArray(select) && 1 <= _.size(select) && _.every(select, _.isString), "select must be a non-empty array of strings");
-    assert(
-      _.every(select, x => x.match(AttributeNameRE)),
-      `Illegal attribute name in select option. All attribute names must match ${AttributeNameRE}.`,
-    );
+    if (!select_all) {
+      assert(_.isArray(select) && 1 <= _.size(select) && _.every(select, _.isString), "select must be '*' or a non-empty array of strings");
+      assert(
+        _.every(select, x => x.match(AttributeNameRE)),
+        `Illegal attribute name in select option. All attribute names must match ${AttributeNameRE}.`,
+      );
+      assert(!_.includes(select, "controls"), "ActiveDirectoryHandler.getObjects does not support selecting the field 'controls'");
+      assert(!_.includes(select, "dn"), "ActiveDirectoryHandler.getObjects does not support selecting the field 'dn'. Did you perhaps mean 'distinguishedName'?");
+    }
     assert(validDN(from), "from must be a valid DN");
     assert(_.isString(scope) && _.includes(["base", "one", "sub"], scope), "scope must be one of 'base', 'one' or 'sub'.");
-    assert(!_.includes(select, "controls"), "ActiveDirectoryHandler.getObjects does not support selecting the field 'controls'");
-    assert(!_.includes(select, "dn"), "ActiveDirectoryHandler.getObjects does not support selecting the field 'dn'. Did you perhaps mean 'distinguishedName'?");
-    const select_includes_distinguishedName = _.includes(select, "distinguishedName");
-    const select_includes_member = _.includes(select, "member");
+    assert(_.size(invalidSearchOptions) === 0, `Invalid search option(s) in ActiveDirectoryHandler.getObjects: ${_.keys(invalidSearchOptions)}`);
+    const select_includes = attrib => select_all || _.includes(select, attrib);
+    const select_includes_distinguishedName = select_includes(select, "distinguishedName");
+    const select_includes_member = select_includes(select, "member");
 
     if (waitForInitialization) {
       // Ensure we are initialized
@@ -239,8 +259,10 @@ class ActiveDirectoryHandler {
       }
       assert(this.initialized);
       // Validate attributes against schema
-      for (const attrib of select) {
-        assert(attrib in this.dictSingleValued, `Refuse to fetch non-existent attribute '${attrib}'`);
+      if (!select_all) {
+        for (const attrib of select) {
+          assert(attrib in this.dictSingleValued, `Refuse to fetch non-existent attribute '${attrib}'`);
+        }
       }
     }
 
@@ -257,10 +279,10 @@ class ActiveDirectoryHandler {
       await bind(this.user, this.password);
 
       // Send query
-      const attributes = _.uniq([...select, "distinguishedName"]);
+      const attributes = select_all ? "*" : _.uniq([...select, "distinguishedName"]);
       const emitter = await search(from, {
         attributes,
-        filter: ldapfilter(where, this.booleanAttributes),
+        filter: ldapfilter(clientSideTransitiveSearch ? await this.rewrite_filter_for_transitive_membership(where, req) : where, this.booleanAttributes),
         scope,
         paged: { pagePause: true },
       });
@@ -328,7 +350,8 @@ class ActiveDirectoryHandler {
         });
 
       // Function to process each item
-      const formats = _.pick(this.extractionFormatters, select);
+      const formats = select_all ? this.extractionFormatters : _.pick(this.extractionFormatters, select);
+      const attribute_ok = select_all ? attribute => attribute in this.dictSingleValued : attribute => _.includes(select, attribute);
       const process = async entry => {
         const obj = entry.object,
           rawobj = { dn: [null] }; // See comment below
@@ -344,7 +367,7 @@ class ActiveDirectoryHandler {
           // - Filters for the existence of an attribute can be OK depending on what attribute it is.
           // Here, we only detect the situation and throw an error.
           throw futile.err(
-            "ldapjs parsed an entry with no attributes, when at least one attribute is expected. If you have no need to read this object, it is likely possible to fix this problem by choosing a more restrictive filter. Any filter that somehow restricts the value of an attribute should do; that seems to exclude objects read in this way.",
+            'ldapjs parsed an entry with no attributes, when at least one attribute is expected. If you have no need to read this object, it is likely possible to fix this problem by choosing a more restrictive filter. Any filter that somehow restricts the value of an attribute can help, for example ["has", "objectCategory"]; that seems to exclude objects read in this way.',
             { distinguishedName: entry._dn },
           );
         }
@@ -353,7 +376,7 @@ class ActiveDirectoryHandler {
         // Compensate for ldapjs's quirks, among those the failure to distinguish
         // between single- and multi-valued attributes, as documented above.
         for (const attrib in obj) {
-          if (!_.includes(select, attrib)) {
+          if (!attribute_ok(attrib)) {
             if (attrib === "controls" || attrib === "dn") {
               // controls and dn attributes are known to be returned without
               // having been asked for. We'll ignore those.
@@ -383,7 +406,7 @@ class ActiveDirectoryHandler {
               ret.member = members;
               continue;
             }
-            throw futile.err("Got attribute without asking for it.", { attrib });
+            throw futile.err(select_all ? "Got attribute that's not supposed to exist" : "Got attribute without asking for it.", { attrib });
           }
           let value = obj[attrib];
           if (this.dictSingleValued[attrib] === false) {
@@ -476,6 +499,58 @@ class ActiveDirectoryHandler {
     }
     assert(searchresult.length === 1);
     return searchresult[0];
+  }
+
+  async getObjectsA(args) {
+    const ret = [];
+    for await (const item of this.getObjects(args)) {
+      ret.push(item);
+    }
+    return ret;
+  }
+
+  // Transitive (a.k.a. in-chain) membership lookup can be performed using the
+  // special attribute names "_transitive_member" and "_transitive_memberOf",
+  // which use the server-side matching rule LDAP_MATCHING_RULE_IN_CHAIN to
+  // perform a transitive search. With the server doing the recursion, the query
+  // should be quite performant, but in practice it is inexcusably slow. So,
+  // below is an ad-hoc, hacky, chatty, and probably bug-ridden implementation
+  // of transitive membership search. Mysteriously, it is faster by 1-2 orders
+  // of magnitude.
+
+  async rewrite_filter_for_transitive_membership_Helper_transitiveGroupLookup(attribute, startingDNs, req) {
+    let toLookup = startingDNs;
+    let ret = [];
+    while (toLookup.length) {
+      const nextLevelGroups = _.map(await this.getObjectsA({
+        select: ["distinguishedName"],
+        from: this.clientSideTransitiveSearchBaseDN,
+        where: ["and", ["equals", "objectClass", "group"], ["equals", "objectCategory", "group"], ["oneof", attribute, toLookup]],
+        req,
+      }), "distinguishedName");
+      ret = _.union(ret, toLookup);
+      toLookup = _.difference(nextLevelGroups, ret);
+    }
+    return ret;
+  }
+
+  async rewrite_filter_for_transitive_membership_Helper(filter, req) {
+    const [op, ...args] = filter;
+    if (_.includes(["and", "or", "not"], op)) {
+      return [op, ...await Promise.all(_.map(args, x => this.rewrite_filter_for_transitive_membership_Helper(x, req)))];
+    }
+    if (_.includes(["equals", "oneof"], op) && _.includes(["_transitive_member", "_transitive_memberOf"], args[0])) {
+      const [transitive_attrib, value] = args;
+      const attrib = { _transitive_member: "member", _transitive_memberOf: "memberOf" }[transitive_attrib];
+      const arrayValue = op === "oneof" ? value : [value];
+      return ["oneof", attrib, await this.rewrite_filter_for_transitive_membership_Helper_transitiveGroupLookup(attrib, arrayValue, req)];
+    }
+    return filter;
+  }
+
+  rewrite_filter_for_transitive_membership(filter, req) {
+    ldapfilter(filter, this.booleanAttributes); // Validate filter expression
+    return this.rewrite_filter_for_transitive_membership_Helper(filter, req);
   }
 }
 
