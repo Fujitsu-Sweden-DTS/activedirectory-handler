@@ -1,4 +1,5 @@
 "use strict";
+/* eslint complexity: ["error", 25] */
 const assert = require("assert");
 const futile = require("@fujitsusweden/futile");
 const _ = require("lodash");
@@ -60,7 +61,6 @@ async function ensureInitialized({ adHandler, req }) {
   assert(adHandler.initialized, "Initialization ineffective");
 }
 
-/* eslint-disable-next-line complexity */
 async function testOneAttribute({ adHandler, attribute, req, method = 1 }) {
   await ensureInitialized({ adHandler, req });
   try {

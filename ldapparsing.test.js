@@ -1,6 +1,6 @@
 "use strict";
 /* global test, expect, Buffer */
-/* eslint no-magic-numbers: "off" */
+/* eslint-disable no-magic-numbers */
 const ldapparsing = require("./ldapparsing.js");
 const undef = {}.undef;
 
