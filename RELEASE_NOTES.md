@@ -26,3 +26,9 @@ Maintenance only.
 - Add config options `clientSideTransitiveSearchBaseDN` and `clientSideTransitiveSearchDefault`.
 - Add `getObjectsA` function.
 - Various improvements/fixes
+
+## v0.5.0
+
+- Add integration tests.
+- Transparent fetching of all values when server returns only some. (Previously only supported for the `member` attribute.)
+- Various improvements/fixes.
