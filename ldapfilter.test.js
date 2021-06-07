@@ -1,6 +1,6 @@
 "use strict";
 /* global describe, test, expect */
-/* eslint no-magic-numbers: "off" */
+/* eslint-disable no-magic-numbers */
 const _ = require("lodash");
 const assert = require("assert");
 const ldapfilter = require("./ldapfilter.js");
