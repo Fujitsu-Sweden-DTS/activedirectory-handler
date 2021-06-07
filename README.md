@@ -16,7 +16,7 @@ Compared to ldapjs, this package have the following advantages:
   Values come in an array if and only if the attribute is multi-valued.
 * Correctly parses several data types that ldapjs doesn't:
   Sid, GUID, Bool, Int32, Windows NT time format, GeneralizedTime and OctetString.
-* Workaround for a server refusing to return all entries in the `member` attribute.
+* Transparent fetching of all values in an attribute when the server limits the number of values per query.
 
 and the following disadvantages:
 
@@ -129,62 +129,62 @@ A filter expression in this [DSL/mini-language](https://en.wikipedia.org/wiki/Do
 It has the following grammar:
 
 ```
-     <expression> := <and> | <or> | <not> | <equals> | <beginswith> |
-                     <endswith> | <contains> | <has> | <oneof> | <true> |
-                     <false>
-     <and>        := ["and", <expression>, <expression>, ...]
-     <or>         := ["or", <expression>, <expression>, ...]
-     <not>        := ["not", <expression>]
-     <equals>     := ["equals", <attribute>, <value>]
-     <beginswith> := ["beginswith", <attribute>, <value>]
-     <endswith>   := ["endswith", <attribute>, <value>]
-     <contains>   := ["contains", <attribute>, <value>]
-     <has>        := ["has", <attribute>]
-     <oneof>      := ["oneof", <attribute>, <arrValue>]
-     <true>       := ["true"]
-     <false>      := ["false"]
-     <attribute>  := A string matching /^[A-Za-z][A-Za-z0-9-]{0,59}$/ i.e.
-                     1-60 English alphanumeric characters or dashes, the
-                     first of which is a letter. It can also be
-                     "_transitive_member" or "_transitive_memberOf" for
-                     transitive (a.k.a. in-chain) membership searches.
-     <value>      := A string matching /^.{1,255}$/ i.e. with a length in
-                     the interval [1, 255].
-     <arrValue>   := An array with zero or more items, each of which must
-                     be a <value>.
+<expression> := <and> | <or> | <not> | <equals> | <beginswith> |
+                <endswith> | <contains> | <has> | <oneof> | <true> |
+                <false>
+<and>        := ["and", <expression>, <expression>, ...]
+<or>         := ["or", <expression>, <expression>, ...]
+<not>        := ["not", <expression>]
+<equals>     := ["equals", <attribute>, <value>]
+<beginswith> := ["beginswith", <attribute>, <value>]
+<endswith>   := ["endswith", <attribute>, <value>]
+<contains>   := ["contains", <attribute>, <value>]
+<has>        := ["has", <attribute>]
+<oneof>      := ["oneof", <attribute>, <arrValue>]
+<true>       := ["true"]
+<false>      := ["false"]
+<attribute>  := A string matching /^[A-Za-z][A-Za-z0-9-]{0,59}$/ i.e.
+                1-60 English alphanumeric characters or dashes, the
+                first of which is a letter. It can also be
+                "_transitive_member" or "_transitive_memberOf" for
+                transitive (a.k.a. in-chain) membership searches.
+<value>      := A string matching /^.{1,255}$/ i.e. with a length in
+                the interval [1, 255].
+<arrValue>   := An array with zero or more items, each of which must
+                be a <value>.
 ```
 
 The semantics are as follows:
 
 ```
-     ["and", X1, ...]:     All expressions are true.
-     ["or", X1, ...]:      At least one expression is true.
-     ["not", X]:           X is false.
-     ["equals", A, V]:     True if the object has an attribute A with a
-                           value that equals V, or a multi-valued
-                           attribute A where at least one of the values
-                           equals V.
-     ["beginswith", A, V]: True if the object has an attribute A with a
-                           value that begins with V, or a multi-valued
-                           attribute A where at least one of the values
-                           begins with V.
-     ["endswith", A, V]:   True if the object has an attribute A with a
-                           value that ends with V, or a multi-valued
-                           attribute A where at least one of the values
-                           ends with V.
-     ["contains", A, V]:   True if the object has an attribute A with a
-                           value that contains V as a substring, or a
-                           multi-valued attribute A where at least one of
-                           the values contains V as a substring.
-     ["has", A]:           True if the object has an attribute A with any
-                           value.
-     ["oneof", A, arrV]:   True if the object has an attribute A with a
-                           value that equals at least one of the elements
-                           of arrV, or a multi-valued attribute A where at
-                           least one of the values equals at least one of
-                           the elements of arrV.
-     ["true"]:             Always true.
-     ["false"]:            Always false.
+["and", X1, ...]:     All expressions are true.
+["or", X1, ...]:      At least one expression is true.
+["not", X]:           X is false.
+["equals", A, V]:     True if the object has an attribute A with a
+                      value that equals V, or a multi-valued
+                      attribute A where at least one of the values
+                      equals V.
+["beginswith", A, V]: True if the object has an attribute A with a
+                      value that begins with V, or a multi-valued
+                      attribute A where at least one of the values
+                      begins with V.
+["endswith", A, V]:   True if the object has an attribute A with a
+                      value that ends with V, or a multi-valued
+                      attribute A where at least one of the values
+                      ends with V.
+["contains", A, V]:   True if the object has an attribute A with a
+                      value that contains V as a substring, or a
+                      multi-valued attribute A where at least one of
+                      the values contains V as a substring.
+["has", A]:           True if the object has an attribute A with any
+                      value.
+["oneof", A, arrV]:   True if the object has an attribute A with a
+                      value that equals at least one of the elements
+                      of arrV, or a multi-valued attribute A where at
+                      least one of the values equals at least one of
+                      the elements of arrV.
+["true"]:             Always true.
+["false"]:            Always false.
 ```
 
 Note that the expressions `beginswith`, `endswith` and `contains`, cannot be used with DN attributes. See details [here](https://social.technet.microsoft.com/wiki/contents/articles/5392.active-directory-ldap-syntax-filters.aspx)
@@ -220,6 +220,29 @@ Variant of `getObjects`.
 An asynchronous function that returns one entry if exactly one entry was found, and ot.
 
 Options sent to `getOneObject` are exactly the same as for `getObjects`.
+
+### runIntegrationTests
+
+Run integration tests.
+These include testing that your configuration works, that `ActiveDirectoryHandler` works with your AD server, and that your AD server fulfills the assumptions made in `ActiveDirectoryHandler`.
+These tests will download a lot of data and can take hours or even days to complete for large domains.
+The `info`, `warning` and `error` log functions will be used to detail possible problems and, if you're lucky, some suggestions.
+
+```js
+await adHandler.runIntegrationTests({ fraction, req });
+```
+
+Details for options sent to `runIntegrationTests`:
+
+* `fraction`:
+  Optional number, defaults to `1`.
+  Designates what fraction of the tests to run.
+  To run only general tests not pertaining to any individual object, use `0`.
+  To also test a random fraction of individual objects, use a number between `0` and `1`.
+  To run all tests, use `1`.
+* `req`:
+  The req object for passing to the log functions.
+  Optional, unless the log functions require it.
 
 ## Development
 

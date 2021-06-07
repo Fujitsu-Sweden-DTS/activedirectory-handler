@@ -1,6 +1,6 @@
 {
   "name": "@fujitsusweden/activedirectory-handler",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Library for fetching data from Active Directory",
   "main": "index.js",
   "scripts": {
@@ -39,7 +39,7 @@
     "moment": "2.29.1"
   },
   "devDependencies": {
-    "@fujitsusweden/eslint-config-standard": "^0.2.0",
+    "@fujitsusweden/eslint-config-standard": "0.2.0",
     "eslint": "7.23.0",
     "jest": "26.6.3"
   },

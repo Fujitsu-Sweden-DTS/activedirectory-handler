@@ -6,6 +6,7 @@ const ldapjs = require("ldapjs");
 const ldapparsing = require("./ldapparsing");
 const futile = require("@fujitsusweden/futile");
 const { promisify } = require("util");
+const integrationTests = require("./integrationTests.js");
 
 const AttributeNameRE = ldapfilter.AttributeNameRE;
 const attributesNeededForInitialization = ["lDAPDisplayName", "attributeSyntax", "isSingleValued"];
@@ -232,8 +233,7 @@ class ActiveDirectoryHandler {
     await this.log.debug({ m: "Initialized ActiveDirectoryHandler", time: new Date() - starttime }, req);
   }
 
-  /* eslint-disable-next-line complexity */
-  async* getObjects({ select, from = this.domainBaseDN, where = ["true"], clientSideTransitiveSearch = this.clientSideTransitiveSearchDefault, scope = "sub", req, waitForInitialization = true, ...invalidSearchOptions } = {}) {
+  async* getObjects({ select, from = this.domainBaseDN, where = ["true"], clientSideTransitiveSearch = this.clientSideTransitiveSearchDefault, scope = "sub", req, waitForInitialization = true, connection, ...invalidSearchOptions } = {}) {
     const select_all = select === "*";
     // Some validation
     if (!select_all) {
@@ -248,9 +248,7 @@ class ActiveDirectoryHandler {
     assert(validDN(from), "from must be a valid DN");
     assert(_.isString(scope) && _.includes(["base", "one", "sub"], scope), "scope must be one of 'base', 'one' or 'sub'.");
     assert(_.size(invalidSearchOptions) === 0, `Invalid search option(s) in ActiveDirectoryHandler.getObjects: ${_.keys(invalidSearchOptions)}`);
-    const select_includes = attrib => select_all || _.includes(select, attrib);
-    const select_includes_distinguishedName = select_includes(select, "distinguishedName");
-    const select_includes_member = select_includes(select, "member");
+    const select_includes = select_all ? attribute => attribute in this.dictSingleValued : attribute => _.includes(select, attribute);
 
     if (waitForInitialization) {
       // Ensure we are initialized
@@ -266,228 +264,241 @@ class ActiveDirectoryHandler {
       }
     }
 
+    // Function to process each item
+    const formats = select_all ? this.extractionFormatters : _.pick(this.extractionFormatters, select);
+    const process = async (entry, process_connection) => {
+      const obj = entry.object,
+        rawobj = { dn: [null] }; // See comment below
+      for (const { type, _vals } of entry.attributes) {
+        assert(!(type in rawobj), "Unexpectedly, ldapjs returned either an entry for 'dn' or a duplicate entry.");
+        rawobj[type] = _vals;
+      }
+      if (entry.attributes.length === 0) {
+        // It seems that in some circumstances, LDAP servers can return entries with no attributes.
+        // The circumstances are:
+        // - The search should be such that it would return an OU that contains objects you're not allowed to see.
+        // - No filters that reference the value of any attributes may be used.
+        // - Filters for the existence of an attribute can be OK depending on what attribute it is.
+        // Here, we only detect the situation and throw an error.
+        throw futile.err(
+          'ldapjs parsed an entry with no attributes, when at least one attribute is expected. If you have no need to read this object, it is likely possible to fix this problem by choosing a more restrictive filter. Any filter that somehow restricts the value of an attribute can help, for example ["has", "objectCategory"]; that seems to exclude objects read in this way.',
+          { distinguishedName: entry._dn },
+        );
+      }
+      const ret = {};
+      // Compensate for ldapjs's quirks, among those the failure to distinguish
+      // between single- and multi-valued attributes, as documented above.
+      for (let attrib in obj) {
+        let value = obj[attrib];
+        let rawvalue = rawobj[attrib];
+        if (attrib.match(/;range=/u)) {
+          // This attribute contained more values than the LDAP server was
+          // willing to return. The following workaround provides a consistent
+          // interface for the price of a little more memory use.
+          const attribMatch = attrib.match(/^([^;]+);range=([0-9]+)-([0-9*]+)$/u);
+          assert(attribMatch, `Strange ranged attribute: ${attrib}`);
+          const [ignored__match, actualAttributeName, rangeFrom, rangeTo] = attribMatch;
+          assert(select_includes(actualAttributeName), select_all ? "Got incomplete value list for non-existent attribute" : "Got incomplete value list for an attribute not asked for.");
+          assert(rangeFrom === "0", "Unexpected offset");
+          assert(rangeTo !== "*", "Unexpected range syntax");
+          assert(_.isEqual(obj[actualAttributeName], []), "Got both complete and incomplete attribute.");
+          assert(this.initialized, "Cannot get large ranges during initialization.");
+          const data = await this.completeValueRange({ distinguishedName: obj.distinguishedName, attribute: actualAttributeName, connection: process_connection });
+          /* eslint-disable-next-line require-atomic-updates */
+          attrib = actualAttributeName;
+          value = data.values;
+          rawvalue = data.rawValues;
+        }
+        if (!select_includes(attrib)) {
+          if (attrib === "controls" || attrib === "dn") {
+            // controls and dn attributes are known to be returned without
+            // having been asked for. We'll ignore those.
+            //
+            continue;
+          }
+          if (attrib === "distinguishedName") {
+            // We always ask for distinguishedName for internal reasons.
+            // However, in this case it shouldn't be included in ret.
+            continue;
+          }
+          throw futile.err(select_all ? "Got attribute that's not supposed to exist" : "Got attribute without asking for it.", { attrib });
+        }
+        if (this.dictSingleValued[attrib] === false) {
+          // Attribute is multi-valued
+          if (_.isArray(value)) {
+            // Attribute is multi-valued and value is array, as it should be. Do nothing.
+          } else {
+            // Attribute is multi-valued but the value needs to be enclosed in an array.
+            value = [value];
+          }
+          assert(value.length === rawvalue.length);
+          // Apply format
+          if (attrib in formats) {
+            value = _.map(_.zip(value, rawvalue), ([val, rawval]) => formats[attrib](val, rawval));
+          }
+        } else if (this.dictSingleValued[attrib] === true) {
+          // Attribute is single-valued
+          if (_.isArray(value)) {
+            throw Error(`Attribute '${attrib}' is single-valued, but value is an array.`);
+          } else {
+            // Attribute is single-valued and value is non-array, as it should be. Do nothing.
+          }
+          assert(rawvalue.length === 1);
+          // Apply format
+          if (attrib in formats) {
+            value = formats[attrib](value, rawvalue[0]);
+          }
+        } else {
+          throw Error(`Missing information about whether attribute '${attrib}' is single-valued.`);
+        }
+        ret[attrib] = value;
+      }
+      return ret;
+    };
+
+    const attributes = select_all ? "*" : _.uniq([...select, "distinguishedName"]);
+    const connection_is_external = Boolean(connection);
+    try {
+      if (!connection_is_external) {
+        connection = await this.newConnection();
+      }
+      const filterExpression = clientSideTransitiveSearch ? await this.rewrite_filter_for_transitive_membership(where, connection, req) : where;
+      for await (const entry of this.rawSearch({ attributes, filterExpression, from, scope, connection })) {
+        yield await process(entry, connection);
+      }
+    } finally {
+      if (connection && !connection_is_external) {
+        await connection.end();
+      }
+    }
+  }
+
+  async newConnection() {
     // Create client
     const ldapClient = ldapjs.createClient({ url: this.url });
-
     // Promisify
     const bind = promisify(ldapClient.bind).bind(ldapClient);
     const search = promisify(ldapClient.search).bind(ldapClient);
     const unbind = promisify(ldapClient.unbind).bind(ldapClient);
-
+    // Connect and authenticate
     try {
-      // Connect and authenticate
       await bind(this.user, this.password);
-
-      // Send query
-      const attributes = select_all ? "*" : _.uniq([...select, "distinguishedName"]);
-      const emitter = await search(from, {
-        attributes,
-        filter: ldapfilter(clientSideTransitiveSearch ? await this.rewrite_filter_for_transitive_membership(where, req) : where, this.booleanAttributes),
-        scope,
-        paged: { pagePause: true },
-      });
-
-      // Buffer control
-      const buffer = [];
-      let should_pause = false;
-      let buffer_callback = null;
-      let resume_callback = null;
-      const bufferctl = function () {
-        // Pausing/resuming the event stream is done by not directly calling the
-        // callback when receiving a 'page' event. Therefore, pausing is
-        // implemented in the generator loop below while resuming is implemented
-        // here.
-        if (buffer.length > buffer_pause_at_length && !should_pause) {
-          should_pause = true;
-        }
-        if (buffer.length < buffer_resume_at_length && should_pause) {
-          should_pause = false;
-          if (resume_callback) {
-            resume_callback();
-            resume_callback = null;
-          }
-        }
-        if (buffer.length && buffer_callback) {
-          buffer_callback(true);
-          buffer_callback = null;
-        }
-      };
-
-      emitter.on("searchEntry", entry => {
-        buffer.push({ op: "entry", entry });
-        bufferctl();
-      });
-      emitter.on("page", (result, callback) => {
-        buffer.push({ op: "page", result, callback });
-        bufferctl();
-      });
-      emitter.on("searchReference", referral => {
-        buffer.push({ op: "referral", referral });
-        bufferctl();
-      });
-      emitter.on("error", err => {
-        buffer.push({ op: "err", err });
-        bufferctl();
-      });
-      // emitter won't start sending events until there is at least one listener to
-      // the "end" event. Since we attach this listener last, we know we won't miss
-      // anything.
-      emitter.on("end", result => {
-        buffer.push({ op: "done", result });
-        bufferctl();
-      });
-
-      const waitUntilBufferIsNonempty = () =>
-        new Promise((resolve, reject) => {
-          if (buffer.length) {
-            resolve(true);
-          } else if (buffer_callback) {
-            reject(new Error("This should never happen"));
-          } else {
-            buffer_callback = resolve;
-            bufferctl();
-          }
-        });
-
-      // Function to process each item
-      const formats = select_all ? this.extractionFormatters : _.pick(this.extractionFormatters, select);
-      const attribute_ok = select_all ? attribute => attribute in this.dictSingleValued : attribute => _.includes(select, attribute);
-      const process = async entry => {
-        const obj = entry.object,
-          rawobj = { dn: [null] }; // See comment below
-        for (const { type, _vals } of entry.attributes) {
-          assert(!(type in rawobj), "Unexpectedly, ldapjs returned either an entry for 'dn' or a duplicate entry.");
-          rawobj[type] = _vals;
-        }
-        if (entry.attributes.length === 0) {
-          // It seems that in some circumstances, LDAP servers can return entries with no attributes.
-          // The circumstances are:
-          // - The search should be such that it would return an OU that contains objects you're not allowed to see.
-          // - No filters that reference the value of any attributes may be used.
-          // - Filters for the existence of an attribute can be OK depending on what attribute it is.
-          // Here, we only detect the situation and throw an error.
-          throw futile.err(
-            'ldapjs parsed an entry with no attributes, when at least one attribute is expected. If you have no need to read this object, it is likely possible to fix this problem by choosing a more restrictive filter. Any filter that somehow restricts the value of an attribute can help, for example ["has", "objectCategory"]; that seems to exclude objects read in this way.',
-            { distinguishedName: entry._dn },
-          );
-        }
-
-        const ret = {};
-        // Compensate for ldapjs's quirks, among those the failure to distinguish
-        // between single- and multi-valued attributes, as documented above.
-        for (const attrib in obj) {
-          if (!attribute_ok(attrib)) {
-            if (attrib === "controls" || attrib === "dn") {
-              // controls and dn attributes are known to be returned without
-              // having been asked for. We'll ignore those.
-              //
-              continue;
-            }
-            if (attrib === "distinguishedName" && !select_includes_distinguishedName) {
-              // We always ask for distinguishedName for internal reasons.
-              // However, in this case it shouldn't be included in ret.
-              continue;
-            }
-            if (attrib.match(/^member;range=/u)) {
-              // Attribute 'member' contained more values than the LDAP server was
-              // willing to return. The following workaround provides a consistent
-              // interface for the price of a little more memory use.
-              assert(select_includes_member, "Got incomplete member attribute without asking for members.");
-              assert(_.isEqual(obj.member, []), "Got both complete and incomplete member attribute.");
-              assert(this.initialized, "Tried to get members before initialization.");
-              const members = [];
-              for await (const member of this.getObjects({
-                select: ["distinguishedName"],
-                where: ["equals", "memberOf", obj.distinguishedName],
-                req,
-              })) {
-                members.push(member.distinguishedName);
-              }
-              ret.member = members;
-              continue;
-            }
-            throw futile.err(select_all ? "Got attribute that's not supposed to exist" : "Got attribute without asking for it.", { attrib });
-          }
-          let value = obj[attrib];
-          if (this.dictSingleValued[attrib] === false) {
-            // Attribute is multi-valued
-            if (_.isArray(value)) {
-              // Attribute is multi-valued and value is array, as it should be. Do nothing.
-            } else {
-              // Attribute is multi-valued but the value needs to be enclosed in an array.
-              value = [value];
-            }
-            assert(value.length === rawobj[attrib].length);
-            // Apply format
-            if (attrib in formats) {
-              value = _.map(_.zip(value, rawobj[attrib]), ([val, rawval]) => formats[attrib](val, rawval));
-            }
-          } else if (this.dictSingleValued[attrib] === true) {
-            // Attribute is single-valued
-            if (_.isArray(value)) {
-              throw Error(`Attribute '${attrib}' is single-valued, but value is an array.`);
-            } else {
-              // Attribute is single-valued and value is non-array, as it should be. Do nothing.
-            }
-            assert(rawobj[attrib].length === 1);
-            // Apply format
-            if (attrib in formats) {
-              value = formats[attrib](value, rawobj[attrib][0]);
-            }
-          } else {
-            throw Error(`Missing information about whether attribute '${attrib}' is single-valued.`);
-          }
-          ret[attrib] = value;
-        }
-        return ret;
-      };
-
-      // Generator
-      outer_loop: while (true) {
-        // Process for as long as something's available
-        while (buffer.length) {
-          // First in, first out
-          const item = buffer.shift();
-          switch (item.op) {
-            case "entry":
-              yield await process(item.entry);
-              break;
-            case "page":
-              // Encode assumption about how ldapjs works
-              assert(!resume_callback);
-              // Callback not present at last page
-              if (!item.callback) {
-                break;
-              }
-              // Implement back-pressure
-              if (should_pause) {
-                resume_callback = item.callback;
-              } else {
-                item.callback();
-              }
-              break;
-            case "referral":
-              throw futile.err("ldapjs produced a 'referral', which ActiveDirectoryHandler doesn't know how to handle", { referral: item.referral });
-            case "err":
-              throw item.err;
-            case "done": {
-              const { status, errorMessage } = item.result;
-              if (status !== 0 || errorMessage !== "") {
-                throw futile.err("LDAP error", { status, ldapjsErrorMessage: errorMessage });
-              }
-              // JavaScript supports breaking to a label but not consecutive breaks.
-              break outer_loop;
-            }
-            default:
-              throw Error("This should never happen");
-          }
-        }
-
-        await waitUntilBufferIsNonempty();
-      }
-    } finally {
-      // Disconnect
+    } catch (err) {
       await unbind();
+      throw err;
+    }
+    return { search, end: unbind };
+  }
+
+  async* rawSearch({ attributes, filterExpression, from, scope, connection }) {
+    assert(connection, "rawSearch called without connection");
+    // Send query
+    const emitter = await connection.search(from, {
+      attributes,
+      filter: ldapfilter(filterExpression, this.booleanAttributes),
+      scope,
+      paged: { pagePause: true },
+    });
+      // Buffer control
+    const buffer = [];
+    let should_pause = false;
+    let buffer_callback = null;
+    let resume_callback = null;
+    const bufferctl = function () {
+      // Pausing/resuming the event stream is done by not directly calling the
+      // callback when receiving a 'page' event. Therefore, pausing is
+      // implemented in the generator loop below while resuming is implemented
+      // here.
+      if (buffer.length > buffer_pause_at_length && !should_pause) {
+        should_pause = true;
+      }
+      if (buffer.length < buffer_resume_at_length && should_pause) {
+        should_pause = false;
+        if (resume_callback) {
+          resume_callback();
+          resume_callback = null;
+        }
+      }
+      if (buffer.length && buffer_callback) {
+        buffer_callback(true);
+        buffer_callback = null;
+      }
+    };
+    emitter.on("searchEntry", entry => {
+      buffer.push({ op: "entry", entry });
+      bufferctl();
+    });
+    emitter.on("page", (result, callback) => {
+      buffer.push({ op: "page", result, callback });
+      bufferctl();
+    });
+    emitter.on("searchReference", referral => {
+      buffer.push({ op: "referral", referral });
+      bufferctl();
+    });
+    emitter.on("error", err => {
+      buffer.push({ op: "err", err });
+      bufferctl();
+    });
+    // emitter won't start sending events until there is at least one listener to
+    // the "end" event. Since we attach this listener last, we know we won't miss
+    // anything.
+    emitter.on("end", result => {
+      buffer.push({ op: "done", result });
+      bufferctl();
+    });
+    const waitUntilBufferIsNonempty = () =>
+      new Promise((resolve, reject) => {
+        if (buffer.length) {
+          resolve(true);
+        } else if (buffer_callback) {
+          reject(new Error("This should never happen"));
+        } else {
+          buffer_callback = resolve;
+          bufferctl();
+        }
+      });
+      // Generator
+    outer_loop: while (true) {
+      // Process for as long as something's available
+      while (buffer.length) {
+        // First in, first out
+        const item = buffer.shift();
+        switch (item.op) {
+          case "entry":
+            yield item.entry;
+            break;
+          case "page":
+            // Encode assumption about how ldapjs works
+            assert(!resume_callback);
+            // Callback not present at last page
+            if (!item.callback) {
+              break;
+            }
+            // Implement back-pressure
+            if (should_pause) {
+              resume_callback = item.callback;
+            } else {
+              item.callback();
+            }
+            break;
+          case "referral":
+            throw futile.err("ldapjs produced a 'referral', which ActiveDirectoryHandler doesn't know how to handle", { referral: item.referral });
+          case "err":
+            throw item.err;
+          case "done": {
+            const { status, errorMessage } = item.result;
+            if (status !== 0 || errorMessage !== "") {
+              throw futile.err("LDAP error", { status, ldapjsErrorMessage: errorMessage });
+            }
+            // JavaScript supports breaking to a label but not consecutive breaks.
+            break outer_loop;
+          }
+          default:
+            throw Error("This should never happen");
+        }
+      }
+      await waitUntilBufferIsNonempty();
     }
   }
 
@@ -509,6 +520,61 @@ class ActiveDirectoryHandler {
     return ret;
   }
 
+  // Helper function to get all values of one attribute of one object, used in cases where the server isn't willing to send them all in one go.
+  async completeValueRange({ distinguishedName, attribute, initValues = [], initRawValues = [], connection }) {
+    assert(_.isArray(initValues) && _.isArray(initRawValues) && (initValues.length === initRawValues.length), "Illegal init values");
+    assert(connection, "completeValueRange called without connection");
+    const OVERLAP = 10;
+    const offset = Math.max(0, initValues.length - OVERLAP);
+    assert(_.isInteger(offset) && 0 <= offset, "Bad offset");
+    const entries = [];
+    for await (const entry of this.rawSearch({ attributes: ["distinguishedName", `${attribute};range=${offset}-*`], filterExpression: ["equals", "distinguishedName", distinguishedName], from: distinguishedName, scope: "sub", connection })) {
+      entries.push(entry);
+    }
+    assert(entries.length === 1, "Didn't get exactly one result in getFullRangeOfValues");
+    const [entry] = entries;
+    let checkedDN = false;
+    let gotData = false;
+    let data = null;
+    for (const { type, _vals } of entry.attributes) {
+      if (type === "distinguishedName") {
+        assert(!checkedDN, "Duplicate distinguishedName attribute");
+        assert(entry.object.distinguishedName === distinguishedName, "Got result for wrong distinguishedName");
+        checkedDN = true;
+      } else {
+        assert(!gotData, "Superfluous attribute");
+        const attribMatch = type.match(/^([^;]+);range=([0-9]+)-([0-9*]+)$/u);
+        assert(attribMatch, "Unexpected attribute");
+        const [ignored__match, actualAttributeName, rangeFrom, rangeTo] = attribMatch;
+        assert(actualAttributeName === attribute, "Unexpected ranged attribute");
+        assert(`${offset}` === rangeFrom, "Got unwanted range");
+        gotData = true;
+        data = { vals: entry.object[type], rawvals: _vals, rangeTo };
+      }
+    }
+    assert(checkedDN, "Didn't get distinguishedName in result");
+    assert(gotData, "Didn't get data in result");
+    assert(_.isArray(data.vals) && _.isArray(data.rawvals) && (data.vals.length === data.rawvals.length), "Got weird data");
+    assert(OVERLAP < data.vals.length, "Overlap not covered");
+    // For some (probably unfathomably profound) reason, Microsoft LDAP server
+    // (or at least ldapjs) seems to consistently return ranged query results in
+    // reverse order with repect to whatever order the range refers to.
+    const newValues = _.reverse([...data.vals]);
+    const newRawValues = _.reverse([...data.rawvals]);
+    for (let i = offset; i < initValues.length; i++) {
+      assert(_.isEqual(initValues[i], newValues[i - offset]), "Overlap mismatch in values");
+      assert(_.isEqual(initRawValues[i], newRawValues[i - offset]), "Overlap mismatch in raw values");
+    }
+    const concatenatedValues = [...initValues.slice(0, offset), ...newValues];
+    const concatenatedRawValues = [...initRawValues.slice(0, offset), ...newRawValues];
+    if (data.rangeTo === "*") {
+      return { values: newValues, rawValues: newRawValues };
+    } else {
+      assert(data.rangeTo === `${offset + newValues.length - 1}`, "Inconsistent end of range");
+      return this.completeValueRange({ distinguishedName, attribute, initValues: concatenatedValues, initRawValues: concatenatedRawValues, connection });
+    }
+  }
+
   // Transitive (a.k.a. in-chain) membership lookup can be performed using the
   // special attribute names "_transitive_member" and "_transitive_memberOf",
   // which use the server-side matching rule LDAP_MATCHING_RULE_IN_CHAIN to
@@ -518,7 +584,7 @@ class ActiveDirectoryHandler {
   // of transitive membership search. Mysteriously, it is faster by 1-2 orders
   // of magnitude.
 
-  async rewrite_filter_for_transitive_membership_Helper_transitiveGroupLookup(attribute, startingDNs, req) {
+  async rewrite_filter_for_transitive_membership_Helper_transitiveGroupLookup({ attribute, startingDNs, connection, req }) {
     let toLookup = startingDNs;
     let ret = [];
     while (toLookup.length) {
@@ -526,6 +592,7 @@ class ActiveDirectoryHandler {
         select: ["distinguishedName"],
         from: this.clientSideTransitiveSearchBaseDN,
         where: ["and", ["equals", "objectClass", "group"], ["equals", "objectCategory", "group"], ["oneof", attribute, toLookup]],
+        connection,
         req,
       }), "distinguishedName");
       ret = _.union(ret, toLookup);
@@ -534,23 +601,30 @@ class ActiveDirectoryHandler {
     return ret;
   }
 
-  async rewrite_filter_for_transitive_membership_Helper(filter, req) {
+  async rewrite_filter_for_transitive_membership_Helper(filter, connection, req) {
     const [op, ...args] = filter;
     if (_.includes(["and", "or", "not"], op)) {
-      return [op, ...await Promise.all(_.map(args, x => this.rewrite_filter_for_transitive_membership_Helper(x, req)))];
+      return [op, ...await Promise.all(_.map(args, x => this.rewrite_filter_for_transitive_membership_Helper(x, connection, req)))];
     }
     if (_.includes(["equals", "oneof"], op) && _.includes(["_transitive_member", "_transitive_memberOf"], args[0])) {
       const [transitive_attrib, value] = args;
       const attrib = { _transitive_member: "member", _transitive_memberOf: "memberOf" }[transitive_attrib];
       const arrayValue = op === "oneof" ? value : [value];
-      return ["oneof", attrib, await this.rewrite_filter_for_transitive_membership_Helper_transitiveGroupLookup(attrib, arrayValue, req)];
+      return ["oneof", attrib, await this.rewrite_filter_for_transitive_membership_Helper_transitiveGroupLookup({ attribute: attrib, startingDNs: arrayValue, connection, req })];
     }
     return filter;
   }
 
-  rewrite_filter_for_transitive_membership(filter, req) {
+  rewrite_filter_for_transitive_membership(filter, connection, req) {
+    assert(connection, "rewrite_filter_for_transitive_membership called without connection");
     ldapfilter(filter, this.booleanAttributes); // Validate filter expression
-    return this.rewrite_filter_for_transitive_membership_Helper(filter, req);
+    return this.rewrite_filter_for_transitive_membership_Helper(filter, connection, req);
+  }
+
+  // Integration tests are in a separate file
+
+  async runIntegrationTests({ fraction, req }) {
+    await integrationTests.runIntegrationTests({ adHandler: this, fraction, req });
   }
 }
 
