@@ -34,12 +34,12 @@ async function chunkedProcess({ process, input, onProgress, chunkSize }) {
   }
 }
 
-async function ensureSameResults({ adHandler, req, query1, query2 }) {
+async function ensureSameResults({ adHandler, req, query1, query2, process1=_.identity, process2=_.identity }) {
   // Use the same connection for both queries, so that we won't fail on differences between servers
   const connection = await adHandler.newConnection();
   try {
     for (const attempt of ["first", "last"]) {
-      const [onlyIn1, ignored__both, onlyIn2] = futile.diffIntDiff(await adHandler.getObjectsA({ ...query1, connection, req }), await adHandler.getObjectsA({ ...query2, connection, req }));
+      const [onlyIn1, ignored__both, onlyIn2] = futile.diffIntDiff(process1(await adHandler.getObjectsA({ ...query1, connection, req })),process2(await adHandler.getObjectsA({ ...query2, connection, req })))
       if (onlyIn1.length || onlyIn2.length) {
         if (attempt === "last") {
           await adHandler.log.warn({ m: "These two queries should have produced the same results, but they didn't.", query1, query2, onlyIn1, onlyIn2 }, req);
@@ -154,6 +154,40 @@ async function testOneGroup({ adHandler, distinguishedName, req }) {
     query1: { select: ["distinguishedName"], where: ["and", ["equals", "objectClass", "group"], ["equals", "objectCategory", "group"], ["equals", "_transitive_memberOf", distinguishedName]], clientSideTransitiveSearch: true },
     query2: { select: ["distinguishedName"], where: ["and", ["equals", "objectClass", "group"], ["equals", "objectCategory", "group"], ["equals", "_transitive_memberOf", distinguishedName]], clientSideTransitiveSearch: false },
   });
+  await ensureSameResults({
+    adHandler,
+    req,
+    query1: {  select: ["distinguishedName","_transitive_member"], where: ["equals","distinguishedName",distinguishedName], clientSideTransitiveSearch: true },
+    query2: {  select: ["distinguishedName","_transitive_member"], where: ["equals","distinguishedName",distinguishedName], clientSideTransitiveSearch: false },
+  })
+  await ensureSameResults({
+    adHandler,
+    req,
+    query1: {  select: ["distinguishedName","_transitive_memberOf"], where: ["equals","distinguishedName",distinguishedName], clientSideTransitiveSearch: true },
+    query2: {  select: ["distinguishedName","_transitive_memberOf"], where: ["equals","distinguishedName",distinguishedName], clientSideTransitiveSearch: false },
+  })
+  await ensureSameResults({
+    adHandler,
+    req,
+    query1: { select: ["distinguishedName","_transitive_member"], where: ["equals","distinguishedName", distinguishedName],  },
+    process1:(results)=>{
+      assert(results.length===1);
+      assert(results[0].distinguishedName===distinguishedName)
+      return results[0]._transitive_member},
+    query2: { select: ["distinguishedName"], where: ["equals", "_transitive_memberOf", distinguishedName]},
+    process2:(results)=>_.map(results,x=>x.distinguishedName)
+  })
+  await ensureSameResults({
+    adHandler,
+    req,
+    query1: { select: ["distinguishedName","_transitive_memberOf"], where: ["equals","distinguishedName", distinguishedName],  },
+    process1:(results)=>{
+      assert(results.length===1);
+      assert(results[0].distinguishedName===distinguishedName)
+      return results[0]._transitive_member},
+    query2: { select: ["distinguishedName"], where: ["equals", "_transitive_member", distinguishedName]},
+    process2:(results)=>_.map(results,x=>x.distinguishedName)
+  })
 }
 
 async function testGroups({ adHandler, fraction = 1, req }) {

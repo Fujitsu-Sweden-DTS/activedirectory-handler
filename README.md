@@ -105,6 +105,7 @@ Details for options sent to `getObjects`:
 * `select`:
   Required, either non-empty array of strings or `"*"`.
   A list of the names of the attributes to fetch, or `"*"` for fetching all attributes.
+  If you provide a list, you may use the special attributes `_transitive_member` and `_transitive_memberOf` to get transitive (a.k.a. in-chain) membership lists.
 * `from`:
   Optional string, defaults to the value of the `domainBaseDN` config option.
   The base DN to search.

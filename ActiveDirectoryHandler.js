@@ -239,8 +239,8 @@ class ActiveDirectoryHandler {
     if (!select_all) {
       assert(_.isArray(select) && 1 <= _.size(select) && _.every(select, _.isString), "select must be '*' or a non-empty array of strings");
       assert(
-        _.every(select, x => x.match(AttributeNameRE)),
-        `Illegal attribute name in select option. All attribute names must match ${AttributeNameRE}.`,
+        _.every(select, x => x.match(AttributeNameRE) || x==='_transitive_member' || x==='_transitive_memberOf'),
+        `Illegal attribute name in select option. All attribute names must match ${AttributeNameRE}, except for the special attributes '_transitive_member' and '_transitive_memberOf'.`,
       );
       assert(!_.includes(select, "controls"), "ActiveDirectoryHandler.getObjects does not support selecting the field 'controls'");
       assert(!_.includes(select, "dn"), "ActiveDirectoryHandler.getObjects does not support selecting the field 'dn'. Did you perhaps mean 'distinguishedName'?");
@@ -266,6 +266,8 @@ class ActiveDirectoryHandler {
 
     // Function to process each item
     const formats = select_all ? this.extractionFormatters : _.pick(this.extractionFormatters, select);
+    const add_transitive_member=_.includes(select,'_transitive_member')
+    const add_transitive_memberOf=_.includes(select,'_transitive_memberOf')
     const process = async (entry, process_connection) => {
       const obj = entry.object,
         rawobj = { dn: [null] }; // See comment below
@@ -356,7 +358,7 @@ class ActiveDirectoryHandler {
       return ret;
     };
 
-    const attributes = select_all ? "*" : _.uniq([...select, "distinguishedName"]);
+    const attributes = select_all ? "*" : _.filter(_.uniq([...select, "distinguishedName"]), x=>x!=='_transitive_member'&&x!=='_transitive_memberOf')
     const connection_is_external = Boolean(connection);
     try {
       if (!connection_is_external) {
