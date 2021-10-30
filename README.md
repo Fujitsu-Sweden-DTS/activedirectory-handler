@@ -217,7 +217,7 @@ Details for options sent to `getObjectsA` are exactly the same as for `getObject
 ### getOneObject
 
 Variant of `getObjects`.
-An asynchronous function that returns one entry if exactly one entry was found, and ot.
+An asynchronous function that returns one entry if exactly one entry was found, and otherwise throws an error.
 
 Options sent to `getOneObject` are exactly the same as for `getObjects`.
 
