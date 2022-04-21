@@ -32,3 +32,7 @@ Maintenance only.
 - Add integration tests.
 - Transparent fetching of all values when server returns only some. (Previously only supported for the `member` attribute.)
 - Various improvements/fixes.
+
+## v0.5.1
+
+- Updated npm packages
