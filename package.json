@@ -36,7 +36,7 @@
     "@fujitsusweden/futile": "0.3.0",
     "ldapjs": "2.2.4",
     "lodash": "4.17.21",
-    "moment": "2.29.1"
+    "moment": "^2.29.4"
   },
   "devDependencies": {
     "@fujitsusweden/eslint-config-standard": "0.2.0",
