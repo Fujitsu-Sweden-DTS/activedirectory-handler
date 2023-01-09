@@ -35,4 +35,4 @@ Maintenance only.
 
 ## v0.5.1
 
-- Updated npm packages
+- Update npm dependencies
