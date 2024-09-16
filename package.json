@@ -1,6 +1,6 @@
 {
   "name": "@fujitsusweden/activedirectory-handler",
-  "version": "0.6.0",
+  "version": "0.5.2",
   "description": "Library for fetching data from Active Directory",
   "main": "index.js",
   "scripts": {
