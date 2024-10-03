@@ -36,3 +36,8 @@ Maintenance only.
 ## v0.5.1
 
 - Update npm dependencies
+
+## v0.6.1
+
+- Update npm dependencies
+- Remove ESLint
