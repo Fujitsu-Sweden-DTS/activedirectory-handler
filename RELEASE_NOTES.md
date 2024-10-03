@@ -40,3 +40,4 @@ Maintenance only.
 ## v0.6.1
 
 - Update npm dependencies
+- Remove ESLint
