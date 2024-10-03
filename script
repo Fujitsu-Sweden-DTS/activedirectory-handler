@@ -26,12 +26,7 @@ npm-ci() {
 
 run-tests() {
     npx jest
-    npx eslint .
     echo-green done testing
-}
-
-eslint-fix() {
-    npx eslint . --fix "$@"
 }
 
 die() {
@@ -66,8 +61,6 @@ Usage:
   ./script npm-ci            # Install npm dependencies according to lockfile.
 
   ./script run-tests         # Run tests.
-
-  ./script eslint-fix        # Let ESLint fix everything it can.
 
   ./script publish           # Make sure everything looks ready for publishing,
                              # and then publish to registry.
