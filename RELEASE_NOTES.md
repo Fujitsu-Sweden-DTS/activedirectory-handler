@@ -41,3 +41,7 @@ Maintenance only.
 
 - Update npm dependencies
 - Remove ESLint
+
+## v0.6.2
+
+- Updated @fujitsusweden/futile
