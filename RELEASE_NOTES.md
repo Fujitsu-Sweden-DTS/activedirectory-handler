@@ -45,3 +45,7 @@ Maintenance only.
 ## v0.6.2
 
 - Updated @fujitsusweden/futile
+
+## v0.7.0
+
+- Resolve vulnerabilities
